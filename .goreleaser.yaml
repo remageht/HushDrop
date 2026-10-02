@@ -1,0 +1,49 @@
+# HushDrop GoReleaser Configuration
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hushdrop
+    main: ./cmd/hushdrop
+    binary: HushDrop
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: hushdrop-archive
+    builds:
+      - hushdrop
+    name_template: "HushDrop-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - .env.example
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

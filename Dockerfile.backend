@@ -1,0 +1,29 @@
+# HushDrop Dev Backend Dockerfile (Dev environment only)
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+COPY go.mod go.sum* ./
+RUN go mod download || true
+
+COPY . .
+
+# Build HushDrop binary with CGO disabled for portable static binary
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /hushdrop ./cmd/hushdrop
+
+FROM alpine:3.20
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /hushdrop /app/hushdrop
+
+# Expose default HushDrop secure port
+EXPOSE 8443
+
+# Run in portable mode by default
+ENTRYPOINT ["/app/hushdrop", "--portable"]

@@ -1,0 +1,31 @@
+# HushDrop Git Ignore Rules
+
+# Runtime data & secrets (CRITICAL: NEVER COMMIT)
+data/
+dist/
+certs/
+*.key
+*.pem
+.env
+*.log
+
+# Build artifacts & binaries
+/HushDrop
+/HushDrop.exe
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+
+# Frontend dependencies & builds
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  hushdrop-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: hushdrop-dev
+    ports:
+      - "8443:8443"
+    environment:
+      - PORT=8443
+      - HOST=0.0.0.0
+      - PORTABLE=true
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
