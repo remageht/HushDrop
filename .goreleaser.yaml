@@ -26,14 +26,20 @@ archives:
     builds:
       - hushdrop
     name_template: "HushDrop-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
       - .env.example
+
+release:
+  mode: replace
+  replace_existing_artifacts: true
 
 checksum:
   name_template: "checksums.txt"
