@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -305,4 +306,65 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Support HTTP Range headers for resuming & fast parallel download
 	http.ServeContent(w, r, meta.CleanName, stat.ModTime(), file)
+}
+
+func (s *Server) handleCertDownload(w http.ResponseWriter, r *http.Request) {
+	if s.tlsInfo == nil || s.tlsInfo.CertFile == "" {
+		http.Error(w, "Certificate not available", http.StatusNotFound)
+		return
+	}
+
+	certData, err := os.ReadFile(s.tlsInfo.CertFile)
+	if err != nil {
+		http.Error(w, "Failed to read certificate", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"hushdrop.crt\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(certData)
+}
+
+func (s *Server) handleHTTPHelperLanding(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(r.Host); err == nil {
+		host = h
+	}
+	httpsURL := fmt.Sprintf("https://%s:%d/", host, s.config.Port)
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HushDrop — Сертификат и вход</title>
+<style>
+body { background: #0b0f19; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+.card { background: #161e2e; border: 1px solid #334155; border-radius: 16px; padding: 28px; max-width: 480px; width: 100%%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+h1 { font-size: 20px; margin-top: 0; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
+p { font-size: 14px; line-height: 1.6; color: #94a3b8; }
+.fp-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; color: #22c55e; margin: 16px 0; }
+.btn { display: block; text-align: center; padding: 12px 18px; border-radius: 10px; font-weight: 600; font-size: 14px; text-decoration: none; margin-bottom: 12px; transition: opacity 0.2s; }
+.btn-primary { background: #0284c7; color: #ffffff; }
+.btn-secondary { background: #334155; color: #f1f5f9; }
+.btn:hover { opacity: 0.9; }
+.note { font-size: 12px; color: #64748b; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔒 HushDrop Local Helper</h1>
+  <p>HushDrop работает в защищенном режиме по <b>HTTPS (TLS 1.3)</b> с локальным самоподписанным сертификатом.</p>
+  <div class="fp-box">SHA-256 Fingerprint:<br>%s</div>
+  <a class="btn btn-primary" href="%s">Перейти в HushDrop Web App (HTTPS)</a>
+  <a class="btn btn-secondary" href="/cert">Скачать сертификат (hushdrop.crt)</a>
+  <p class="note"><b>Подсказка:</b> Если браузер показывает предупреждение о сертификате, нажмите «Дополнительно» (Advanced) &rarr; «Перейти на сайт» (Proceed). Отпечаток сертификата гарантирует отсутствие перехвата в локальной сети.</p>
+</div>
+</body>
+</html>`, s.tlsInfo.Fingerprint, httpsURL)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(html))
 }

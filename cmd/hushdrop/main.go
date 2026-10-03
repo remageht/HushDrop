@@ -63,6 +63,9 @@ func main() {
 	fmt.Printf("🔒 TLS 1.3 Fingerprint (SHA256): %s\n", tlsInfo.Fingerprint)
 	fmt.Printf("🔑 PIN для сопряжения:          %s (действителен 10 минут)\n", pin)
 	fmt.Printf("🌐 Адрес подключения:            %s\n", primaryURL)
+	if cfg.HTTPPort > 0 {
+		fmt.Printf("📜 Скачать сертификат (HTTP):   http://%s/cert\n", net.JoinHostPort(primaryIP.String(), fmt.Sprintf("%d", cfg.HTTPPort)))
+	}
 	if len(lanIPs) > 1 {
 		fmt.Println("📡 Дополнительные LAN IP:")
 		for _, ip := range lanIPs {

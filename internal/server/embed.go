@@ -41,7 +41,9 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Fallback to index.html for SPA routing
 	indexFile, err := h.staticFS.Open("index.html")
 	if err != nil {
-		http.NotFound(w, r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px;background:#090d16;color:#f8fafc"><h2>HushDrop: Frontend Web Assets Not Built</h2><p>Please compile the React frontend using <code>scripts/build.ps1</code> or run <code>npm run build</code> in <code>frontend/</code> and sync to <code>internal/server/web/</code>.</p></body></html>`))
 		return
 	}
 	defer indexFile.Close()
