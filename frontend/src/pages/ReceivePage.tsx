@@ -58,7 +58,7 @@ export const ReceivePage: React.FC = () => {
         <div>
           <h3 className="text-base font-semibold text-white">Полученные файлы</h3>
           <p className="text-xs text-slate-400">
-            Файлы, переданные в этой сессии напрямую в ./data/downloads
+            Общие файлы хаба (./data/downloads) — видны всем подключенным устройствам. Так можно передавать с телефона на телефон: один загружает, второй забирает.
           </p>
         </div>
 

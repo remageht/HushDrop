@@ -4,7 +4,7 @@
 
 [Русская версия](README.md) | **English**
 
-Private phone ↔ PC file transfer over the local network (Wi-Fi) — no internet, no messengers, no third-party servers, no cloud storage.
+Private phone ↔ PC file transfer over the local network (Wi-Fi) — no internet, no messengers, no third-party servers, no cloud storage. Phone ↔ phone works via the shared hub on the PC: one uploads via "Send", the other picks up via "Receive".
 
 [![Release](https://img.shields.io/badge/release-v0.2.0-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
 [![Status](https://img.shields.io/badge/status-alpha-orange?style=flat)](#security-disclaimer)
