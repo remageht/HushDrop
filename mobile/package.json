@@ -1,0 +1,26 @@
+{
+  "name": "hushdrop-mobile",
+  "version": "0.1.0",
+  "description": "HushDrop mobile Capacitor wrapper for Android sideload",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "cap:sync": "cap sync android",
+    "cap:add:android": "cap add android",
+    "cap:open": "cap open android",
+    "cap:build": "npm run build && cap sync android",
+    "android:build": "cd android && gradlew.bat assembleDebug && cd .."
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/filesystem": "^6.0.2",
+    "@capacitor/preferences": "^6.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "typescript": "^5.6.3"
+  }
+}

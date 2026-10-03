@@ -8,12 +8,31 @@ class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private fingerprint: string | null = null;
+  private serverBaseUrl: string = '';
   private authListeners: Set<AuthListener> = new Set();
 
   constructor() {
     this.accessToken = sessionStorage.getItem('hushdrop_access_token');
     this.refreshToken = sessionStorage.getItem('hushdrop_refresh_token');
     this.fingerprint = sessionStorage.getItem('hushdrop_fingerprint');
+    this.serverBaseUrl = sessionStorage.getItem('hushdrop_server_url') || localStorage.getItem('hushdrop_server_url') || '';
+  }
+
+  public setServerBaseUrl(url: string) {
+    this.serverBaseUrl = url.trim().replace(/\/+$/, '');
+    sessionStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
+    localStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
+  }
+
+  public getServerBaseUrl(): string {
+    return this.serverBaseUrl;
+  }
+
+  public resolveUrl(endpoint: string): string {
+    if (this.serverBaseUrl && endpoint.startsWith('/')) {
+      return `${this.serverBaseUrl}${endpoint}`;
+    }
+    return endpoint;
   }
 
   public subscribeAuth(listener: AuthListener): () => void {
@@ -68,7 +87,7 @@ class ApiClient {
 
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      response = await fetch(this.resolveUrl(endpoint), {
         ...options,
         headers,
       });
@@ -110,7 +129,7 @@ class ApiClient {
   private async tryRefresh(): Promise<boolean> {
     if (!this.refreshToken) return false;
     try {
-      const resp = await fetch('/api/pair/refresh', {
+      const resp = await fetch(this.resolveUrl('/api/pair/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: this.refreshToken }),
@@ -134,12 +153,12 @@ class ApiClient {
 
   // API Methods
   public async getHealth(): Promise<{ status: string; version: string }> {
-    const resp = await fetch('/health');
+    const resp = await fetch(this.resolveUrl('/health'));
     return resp.json();
   }
 
   public async getPairInfo(): Promise<PairInfoResponse> {
-    const resp = await fetch('/api/pair/info');
+    const resp = await fetch(this.resolveUrl('/api/pair/info'));
     if (!resp.ok) {
       throw new Error('Не удалось получить информацию о сервере');
     }
@@ -147,7 +166,7 @@ class ApiClient {
   }
 
   public async pair(pin: string, token: string): Promise<PairSession> {
-    const resp = await fetch('/api/pair', {
+    const resp = await fetch(this.resolveUrl('/api/pair'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin, token }),
@@ -204,7 +223,7 @@ class ApiClient {
       headers.set('Authorization', `Bearer ${this.accessToken}`);
     }
 
-    const response = await fetch('/api/upload', {
+    const response = await fetch(this.resolveUrl('/api/upload'), {
       method: 'POST',
       headers,
       body: chunkBlob,
@@ -281,7 +300,7 @@ class ApiClient {
       headers.set('Authorization', `Bearer ${this.accessToken}`);
     }
 
-    const response = await fetch(`/api/download?id=${encodeURIComponent(fileId)}`, {
+    const response = await fetch(this.resolveUrl(`/api/download?id=${encodeURIComponent(fileId)}`), {
       method: 'GET',
       headers,
     });

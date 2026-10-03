@@ -25,7 +25,8 @@ HushDrop is built for plug-and-play operation directly from removable media (USB
 - **Windows**: Single portable `.zip` containing `HushDrop.exe` (x86_64 and ARM64).
 - **Linux**: Static binary and portable AppImage.
 - **macOS**: Standalone portable `.tar.gz` Mach-O universal binary.
-- **Mobile Fallback**: Android sideload APK and iOS 17+ home screen PWA installation without Google Play Services or App Store dependencies.
+- **Mobile Sideload (Capacitor)**: Android APK built via `@capacitor/android` pointing `webDir` to `../frontend/dist`. Native directories `mobile/android/` and `mobile/ios/` are strictly generated on-the-fly and excluded from git tracking.
+- **Web/iOS Fallback**: iOS 17+ home screen PWA installation without Google Play Services or App Store dependencies.
 
 ## 4. Production Build Commands
 ```bash

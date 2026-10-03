@@ -1,0 +1,17 @@
+# Capacitor Mobile Git Ignore Rules
+
+node_modules/
+dist/
+
+# Native platform projects generated dynamically via cap sync
+android/
+ios/
+
+# Secrets and certificates
+*.key
+*.pem
+*.crt
+*.log
+.env
+.env.*
+!.env.example
