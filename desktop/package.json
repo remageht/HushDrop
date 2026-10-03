@@ -1,0 +1,15 @@
+{
+  "name": "hushdrop-desktop",
+  "version": "0.1.0",
+  "description": "HushDrop Desktop Tauri 2 Portable Wrapper",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "tauri": "tauri",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "typescript": "^5.6.3"
+  }
+}

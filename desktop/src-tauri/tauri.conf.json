@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "HushDrop",
+  "version": "0.1.0",
+  "identifier": "app.hushdrop.desktop",
+  "build": {
+    "frontendDist": "../../frontend/dist",
+    "devUrl": "https://127.0.0.1:8443"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HushDrop — Твои файлы. Твоя сеть. Никого лишнего.",
+        "width": 1100,
+        "height": 750,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": true,
+        "url": "https://127.0.0.1:8443",
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -29,6 +29,12 @@ mobile/dist/
 mobile/android/
 mobile/ios/
 
+# Desktop Tauri builds & targets
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+dist-desktop/
+
 # Embedded web assets (built via npm run build in CI and build scripts)
 internal/server/web/*
 !internal/server/web/.gitkeep
