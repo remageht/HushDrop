@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { KeyRound, ShieldAlert, ShieldCheck, Loader2, QrCode } from 'lucide-react';
+import { KeyRound, ShieldAlert, ShieldCheck, Loader2, QrCode, X } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { PairInfoResponse } from '../types';
 
 interface PairingModalProps {
   onSuccess: () => void;
+  onClose?: () => void;
 }
 
-export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess }) => {
+export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose }) => {
   const [pin, setPin] = useState('');
   const [token, setToken] = useState('');
   const [urlFp, setUrlFp] = useState<string | null>(null);
@@ -67,6 +68,18 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
+        {/* Close Button */}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="absolute top-4 right-4 z-10 p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800/80 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
         {/* Glow accent */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-24 bg-emerald-500/10 blur-3xl pointer-events-none" />
 
