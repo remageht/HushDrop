@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+var safeIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 var dangerousExtensions = map[string]bool{
 	".exe": true,
@@ -25,6 +29,8 @@ var dangerousExtensions = map[string]bool{
 	".scr": true,
 	".reg": true,
 	".jar": true,
+	".dll": true,
+	".sys": true,
 }
 
 type FileMetadata struct {
@@ -55,8 +61,8 @@ type Manager struct {
 
 func NewManager(downloadsDir, tempDir string, maxChunkSize, maxFileSize int64) *Manager {
 	return &Manager{
-		downloadsDir: downloadsDir,
-		tempDir:      tempDir,
+		downloadsDir: filepath.Clean(downloadsDir),
+		tempDir:      filepath.Clean(tempDir),
 		maxChunkSize: maxChunkSize,
 		maxFileSize:  maxFileSize,
 		files:        make(map[string]*FileMetadata),
@@ -64,8 +70,12 @@ func NewManager(downloadsDir, tempDir string, maxChunkSize, maxFileSize int64) *
 	}
 }
 
-// SanitizeFilename eliminates path traversals, null bytes, and malicious control characters
+// SanitizeFilename eliminates path traversals, URL-encodings, null bytes, and malicious characters
 func SanitizeFilename(rawName string) string {
+	if unescaped, err := url.QueryUnescape(rawName); err == nil && unescaped != "" {
+		rawName = unescaped
+	}
+
 	clean := filepath.Base(rawName)
 	clean = strings.ReplaceAll(clean, "\x00", "")
 	clean = strings.ReplaceAll(clean, "..", "")
@@ -87,6 +97,10 @@ func IsDangerousFile(filename string) bool {
 
 // InitUpload initializes a file upload session
 func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunks int) (*FileMetadata, error) {
+	if !safeIDRegex.MatchString(fileID) || len(fileID) < 4 || len(fileID) > 64 {
+		return nil, errors.New("invalid file id: must be alphanumeric and between 4 and 64 characters")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -97,8 +111,21 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 	cleanName := SanitizeFilename(rawName)
 	isDangerous := IsDangerousFile(cleanName)
 
+	prefix := fileID
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
+
 	tempPath := filepath.Join(m.tempDir, fmt.Sprintf("%s.part", fileID))
-	finalPath := filepath.Join(m.downloadsDir, fmt.Sprintf("%s_%s", fileID[:8], cleanName))
+	finalPath := filepath.Join(m.downloadsDir, fmt.Sprintf("%s_%s", prefix, cleanName))
+
+	// Strict directory containment verification (prevent directory traversal)
+	if !strings.HasPrefix(filepath.Clean(tempPath), m.tempDir) {
+		return nil, errors.New("temp path escape detected")
+	}
+	if !strings.HasPrefix(filepath.Clean(finalPath), m.downloadsDir) {
+		return nil, errors.New("destination path escape detected")
+	}
 
 	// Pre-create/truncate temp file
 	f, err := os.OpenFile(tempPath, os.O_CREATE|os.O_RDWR, 0600)
@@ -172,7 +199,7 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 
 	// Verify if all chunks have completed
 	if meta.UploadedChunks >= meta.TotalChunks {
-		if err := m.finalizeUploadLocked(meta); err != nil {
+		if err := m.finalizeUploadLocked(meta, tracker); err != nil {
 			return nil, err
 		}
 	}
@@ -181,7 +208,17 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 	return meta, nil
 }
 
-func (m *Manager) finalizeUploadLocked(meta *FileMetadata) error {
+func (m *Manager) finalizeUploadLocked(meta *FileMetadata, tracker map[int]bool) error {
+	// Integrity check: verify every chunk from 0 to totalChunks-1 was received
+	if len(tracker) != meta.TotalChunks {
+		return fmt.Errorf("incomplete upload: received %d chunks out of %d", len(tracker), meta.TotalChunks)
+	}
+	for i := 0; i < meta.TotalChunks; i++ {
+		if !tracker[i] {
+			return fmt.Errorf("missing chunk %d before finalization", i)
+		}
+	}
+
 	// Truncate temp file to exact final size
 	if err := os.Truncate(meta.TempFilePath, meta.Size); err != nil {
 		return fmt.Errorf("failed to truncate temp file to exact size: %w", err)
@@ -195,10 +232,10 @@ func (m *Manager) finalizeUploadLocked(meta *FileMetadata) error {
 	hasher := sha256.New()
 	buf := make([]byte, 64*1024)
 	if _, err := io.CopyBuffer(hasher, f, buf); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
-	f.Close()
+	_ = f.Close()
 
 	meta.SHA256 = hex.EncodeToString(hasher.Sum(nil))
 

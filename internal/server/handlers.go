@@ -12,8 +12,9 @@ import (
 )
 
 type PairRequest struct {
-	PIN   string `json:"pin"`
-	Token string `json:"token"`
+	PIN          string `json:"pin"`
+	Token        string `json:"token"`
+	ClientPubKey string `json:"clientPubKey,omitempty"`
 }
 
 type RefreshRequest struct {
@@ -24,7 +25,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"service":   "HushDrop",
-		"version":   "1.0.0",
+		"version":   "0.1.0",
 		"timestamp": time.Now().Unix(),
 	})
 }
@@ -67,7 +68,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.pairManager.VerifyPairing(clientIP, req.PIN, req.Token)
+	session, serverPubKey, err := s.pairManager.VerifyPairing(clientIP, req.PIN, req.Token, req.ClientPubKey)
 	if err != nil {
 		log.Printf("[PAIR_FAILED] Failed PIN pairing attempt from masked IP %s", MaskIP(clientIP))
 		respondJSON(w, http.StatusForbidden, map[string]string{
@@ -78,13 +79,18 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PAIR_SUCCESS] Paired device from masked IP %s", MaskIP(clientIP))
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"accessToken":      session.AccessToken,
 		"refreshToken":     session.RefreshToken,
 		"accessExpiresIn":  int(s.config.AccessTokenTTL.Seconds()),
 		"refreshExpiresIn": int(s.config.RefreshTokenTTL.Seconds()),
 		"fingerprint":      s.tlsInfo.Fingerprint,
-	})
+	}
+	if serverPubKey != "" {
+		resp["serverPubKey"] = serverPubKey
+	}
+
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -206,20 +212,26 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	if chunkIdx == 0 {
 		_, err := s.transferManager.InitUpload(fileID, fileName, fileSize, totalChunks)
 		if err != nil {
+			log.Printf("[UPLOAD_INIT_ERR] File %s: %v", MaskFilename(fileName), err)
 			respondJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
+				"error": "Failed to initialize upload session: " + err.Error(),
 			})
 			return
 		}
+		prefix := fileID
+		if len(prefix) > 8 {
+			prefix = prefix[:8]
+		}
 		log.Printf("[UPLOAD_START] New transfer ID %s for masked file %s (%d bytes)",
-			fileID[:8], MaskFilename(fileName), fileSize)
+			prefix, MaskFilename(fileName), fileSize)
 	}
 
 	// Stream chunk directly to disk
 	meta, err := s.transferManager.WriteChunk(fileID, chunkIdx, chunkSize, r.Body)
 	if err != nil {
+		log.Printf("[UPLOAD_CHUNK_ERR] FileID %s chunk %d: %v", fileID, chunkIdx, err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": err.Error(),
+			"error": "Failed to write chunk or finalize file",
 		})
 		return
 	}
@@ -263,8 +275,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	file, err := os.Open(meta.FilePath)
 	if err != nil {
+		log.Printf("[DOWNLOAD_OPEN_ERR] %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to read file on disk",
+			"error": "Failed to open requested file",
 		})
 		return
 	}
@@ -272,8 +285,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	stat, err := file.Stat()
 	if err != nil {
+		log.Printf("[DOWNLOAD_STAT_ERR] %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to stat file",
+			"error": "Failed to stat requested file",
 		})
 		return
 	}

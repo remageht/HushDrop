@@ -4,16 +4,22 @@
 
 Приватная передача файлов телефон ↔ ПК в локальной сети (Wi-Fi) без интернета, мессенджеров, сторонних серверов и облачных хранилищ.
 
+[![Release](https://img.shields.io/badge/release-v0.1.0-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
+[![Status](https://img.shields.io/badge/status-alpha-orange?style=flat)](#дисклеймер-безопасности)
 [![Go Version](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://react.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> [!WARNING]
+> ### Дисклеймер безопасности (Alpha)
+> Проект находится в стадии активной альфа-версии (`v0.1.0`). Предназначен исключительно для локальных сетей (домашний Wi-Fi, локальная офисная сеть, мобильная точка доступа). Не выставляйте порт сервиса наружу в глобальный интернет без VPN. Перед загрузкой файлов сверяйте отпечаток TLS.
 
 ---
 
 ## ⚡ Быстрый старт
 
 ### Windows (Портативный запуск)
-1. Скачайте `HushDrop.exe` (или соберите из исходников).
+1. Скачайте `HushDrop.exe` из [Releases](https://github.com/remageht/HushDrop/releases).
 2. Запустите двойным кликом или из терминала:
    ```cmd
    HushDrop.exe --portable
@@ -29,6 +35,21 @@
 docker compose up --build
 ```
 Интерфейс будет доступен по адресу `https://<lan-ip>:8443`.
+
+---
+
+## 🔍 Как сверить Fingerprint (Отпечаток TLS 1.3)
+
+Сверка отпечатка исключает атаку типа «Человек посередине» (MITM) в недоверенном Wi-Fi:
+
+1. **При старте на ПК** в консоли выводится строка вида:
+   ```
+   🔒 TLS 1.3 Fingerprint (SHA256): ED:5B:3F:AD:D2:...
+   ```
+2. **При сканировании QR-кода** отпечаток передается в ссылке (`&fp=...`).
+3. **В веб-интерфейсе смартфона** в окне ввода PIN отображается отпечаток сервера:
+   - Если хэш совпадает со ссылкой из QR, загорается зелёный бейдж: **«Сверен с QR»**.
+   - Сверьте первые 4 и последние 4 символа с экраном ПК. При совпадении соединение гарантированно установлено напрямую с вашим компьютером.
 
 ---
 
@@ -55,7 +76,7 @@ docker compose up --build
 |---|---|---|
 | `GET` | `/health` | Проверка доступности сервиса |
 | `GET` | `/api/pair/info` | Получение TLS-отпечатка и оставшегося времени сопряжения |
-| `POST` | `/api/pair` | Сопряжение по PIN: возвращает пару `{accessToken, refreshToken}` |
+| `POST` | `/api/pair` | Сопряжение по PIN и X25519: возвращает пару `{accessToken, refreshToken, serverPubKey}` |
 | `POST` | `/api/pair/refresh` | Обновление токена доступа по refresh-токену |
 | `GET` | `/api/files` | Список полученных завершенных файлов |
 | `POST` | `/api/upload` | Загрузка чанка 4MB (`X-File-Id`, `X-Chunk-Index`, `X-Total-Chunks`) |
@@ -69,25 +90,18 @@ docker compose up --build
 Требуются **Go 1.22+** и **Node.js 18+**.
 
 ```bash
-# 1. Сборка фронтенда React PWA
-cd frontend
-npm install
-npm run build
-cd ..
+# Сборка с автоматической упаковкой во фронтенд и директорию ./dist:
+# Для Windows:
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 
-# 2. Синхронизация файлов для go:embed
-cp -r frontend/dist/* internal/server/web/
-
-# 3. Компиляция единого бинарного файла
-go build -ldflags="-s -w" -o HushDrop.exe ./cmd/hushdrop
+# Для Linux / macOS:
+chmod +x ./scripts/build.sh
+./scripts/build.sh
 ```
-
-Или воспользуйтесь готовыми скриптами автоматической сборки:
-- Для Windows: `.\scripts\build.ps1`
-- Для Linux / macOS: `./scripts/build.sh`
 
 ---
 
-## 📄 Лицензия
+## 📄 Лицензия и безопасность
 
-Распространяется под лицензией MIT. Подробнее см. в файле [LICENSE](LICENSE).
+- Лицензия: [MIT](LICENSE)
+- Политика раскрытия уязвимостей: [SECURITY.md](SECURITY.md)

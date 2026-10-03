@@ -2,6 +2,7 @@ package pair
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -97,11 +98,7 @@ func (m *Manager) CheckIPBan(ip string) error {
 	return nil
 }
 
-// RecordFailedAttempt records a failed PIN submission, banning the IP after 5 attempts for 5 minutes
-func (m *Manager) RecordFailedAttempt(ip string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+func (m *Manager) recordFailedAttemptLocked(ip string) {
 	tracker, exists := m.ipAttempts[ip]
 	if !exists {
 		tracker = &IPAttemptTracker{}
@@ -115,6 +112,13 @@ func (m *Manager) RecordFailedAttempt(ip string) {
 	}
 }
 
+// RecordFailedAttempt records a failed PIN submission, banning the IP after 5 attempts for 5 minutes
+func (m *Manager) RecordFailedAttempt(ip string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recordFailedAttemptLocked(ip)
+}
+
 // ClearFailedAttempts resets the attempt counter for an IP on successful pairing
 func (m *Manager) ClearFailedAttempts(ip string) {
 	m.mu.Lock()
@@ -122,10 +126,10 @@ func (m *Manager) ClearFailedAttempts(ip string) {
 	delete(m.ipAttempts, ip)
 }
 
-// VerifyPairing validates PIN and one-time token, creating an active authenticated session
-func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken string) (*Session, error) {
+// VerifyPairing validates PIN and one-time token, performing X25519 key exchange if client public key is provided
+func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken string, clientPubKeyHex string) (*Session, string, error) {
 	if err := m.CheckIPBan(ip); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	m.mu.Lock()
@@ -135,7 +139,7 @@ func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken s
 
 	// Check expiration
 	if now.After(m.pinExpiresAt) || now.After(m.tokenExpiresAt) {
-		return nil, errors.New("pairing PIN or QR token has expired")
+		return nil, "", errors.New("pairing PIN or QR token has expired")
 	}
 
 	// Constant time PIN and token comparison
@@ -143,9 +147,8 @@ func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken s
 	tokenValid := submittedToken == "" || crypto.ConstantTimeEquals(m.oneTimeToken, submittedToken)
 
 	if !pinValid || !tokenValid {
-		// Unlock to record failed attempt without holding write lock
-		go m.RecordFailedAttempt(ip)
-		return nil, errors.New("invalid PIN or token")
+		m.recordFailedAttemptLocked(ip)
+		return nil, "", errors.New("invalid PIN or token")
 	}
 
 	// Successful pairing: reset attempts
@@ -154,11 +157,41 @@ func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken s
 	// Create tokens
 	accessToken, err := crypto.GenerateRandomHex(32)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	refreshToken, err := crypto.GenerateRandomHex(32)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+
+	var sharedKey []byte
+	var serverPubKeyHex string
+
+	if clientPubKeyHex != "" {
+		if clientPubKeyBytes, err := hex.DecodeString(clientPubKeyHex); err == nil && len(clientPubKeyBytes) == 32 {
+			var peerPubKey [32]byte
+			copy(peerPubKey[:], clientPubKeyBytes)
+
+			privKey, pubKey, err := crypto.GenerateX25519KeyPair()
+			if err == nil {
+				sharedSecret, err := crypto.ComputeSharedSecret(privKey, peerPubKey)
+				if err == nil {
+					key, err := crypto.DeriveAESGCMKey(sharedSecret, nil, "HushDrop-E2E-v1")
+					if err == nil {
+						sharedKey = key
+						serverPubKeyHex = hex.EncodeToString(pubKey[:])
+					}
+					crypto.Zeroize(sharedSecret[:])
+				}
+				crypto.Zeroize(privKey[:])
+			}
+		}
+	}
+
+	if sharedKey == nil {
+		if rndKey, err := crypto.GenerateRandomHex(32); err == nil {
+			sharedKey, _ = hex.DecodeString(rndKey)
+		}
 	}
 
 	session := &Session{
@@ -169,12 +202,13 @@ func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken s
 		AccessExpires:  now.Add(m.accessTokenTTL),
 		RefreshExpires: now.Add(m.refreshTokenTTL),
 		LastActivity:   now,
+		SharedKey:      sharedKey,
 	}
 
 	m.sessions[accessToken] = session
 	m.refreshIndex[refreshToken] = accessToken
 
-	return session, nil
+	return session, serverPubKeyHex, nil
 }
 
 // RefreshSession issues a new access token and rotated refresh token

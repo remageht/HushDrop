@@ -18,6 +18,7 @@ export interface PairSession {
   accessExpiresIn: number;
   refreshExpiresIn: number;
   fingerprint: string;
+  serverPubKey?: string;
 }
 
 export interface PairInfoResponse {

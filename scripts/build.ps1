@@ -1,38 +1,63 @@
-# Cross-platform compilation script for HushDrop (PowerShell)
+# Cross-platform release compilation script for HushDrop (PowerShell)
 $ErrorActionPreference = "Stop"
 
+$rootDir = Resolve-Path "$PSScriptRoot\.."
+Set-Location -Path $rootDir
+
 Write-Host "===> 1. Сборка фронтенда React PWA..." -ForegroundColor Cyan
-Set-Location -Path "$PSScriptRoot\..\frontend"
-cmd.exe /c "npm run build"
-Set-Location -Path "$PSScriptRoot\.."
+Set-Location -Path "$rootDir\frontend"
+cmd.exe /c "npm install && npm run build"
+Set-Location -Path $rootDir
 
-Write-Host "===> 2. Синхронизация встроенных ресурсов..." -ForegroundColor Cyan
-Copy-Item -Path "frontend\dist\*" -Destination "internal\server\web\" -Recurse -Force
+Write-Host "===> 2. Синхронизация встроенных ресурсов в internal/server/web..." -ForegroundColor Cyan
+if (!(Test-Path "$rootDir\internal\server\web")) {
+    New-Item -ItemType Directory -Path "$rootDir\internal\server\web" -Force | Out-Null
+}
+Copy-Item -Path "$rootDir\frontend\dist\*" -Destination "$rootDir\internal\server\web\" -Recurse -Force
 
-Write-Host "===> 3. Компиляция статических бинарных файлов Go..." -ForegroundColor Cyan
+Write-Host "===> 3. Компиляция бинарных файлов Go в ./dist/..." -ForegroundColor Cyan
+$distDir = "$rootDir\dist"
+if (!(Test-Path $distDir)) {
+    New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+}
+
 $env:CGO_ENABLED = "0"
-$version = "1.0.0"
+$version = "0.1.0"
 $ldflags = "-s -w -X main.version=$version"
 
-if (!(Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" -Force }
-
-# Windows x64
-Write-Host "   -> Сборка HushDrop.exe (Windows amd64)..." -ForegroundColor Yellow
+# Windows amd64
+Write-Host "   -> Сборка dist/HushDrop.exe (Windows amd64)..." -ForegroundColor Yellow
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
-go build -ldflags $ldflags -o "bin\HushDrop.exe" .\cmd\hushdrop
-Copy-Item "bin\HushDrop.exe" "HushDrop.exe" -Force
+go build -ldflags $ldflags -o "$distDir\HushDrop.exe" .\cmd\hushdrop
+Copy-Item "$distDir\HushDrop.exe" "$rootDir\HushDrop.exe" -Force
 
-# Linux x64
-Write-Host "   -> Сборка hushdrop-linux (Linux amd64)..." -ForegroundColor Yellow
+# Linux amd64
+Write-Host "   -> Сборка dist/hushdrop-linux-amd64 (Linux amd64)..." -ForegroundColor Yellow
 $env:GOOS = "linux"
 $env:GOARCH = "amd64"
-go build -ldflags $ldflags -o "bin\hushdrop-linux-amd64" .\cmd\hushdrop
+go build -ldflags $ldflags -o "$distDir\hushdrop-linux-amd64" .\cmd\hushdrop
 
-# macOS ARM64 & amd64
-Write-Host "   -> Сборка hushdrop-darwin (macOS arm64)..." -ForegroundColor Yellow
+# macOS arm64
+Write-Host "   -> Сборка dist/hushdrop-darwin-arm64 (macOS arm64)..." -ForegroundColor Yellow
 $env:GOOS = "darwin"
 $env:GOARCH = "arm64"
-go build -ldflags $ldflags -o "bin\hushdrop-darwin-arm64" .\cmd\hushdrop
+go build -ldflags $ldflags -o "$distDir\hushdrop-darwin-arm64" .\cmd\hushdrop
 
-Write-Host "===> Сборка успешно завершена в ./bin/ и ./HushDrop.exe" -ForegroundColor Green
+# macOS amd64
+Write-Host "   -> Сборка dist/hushdrop-darwin-amd64 (macOS amd64)..." -ForegroundColor Yellow
+$env:GOOS = "darwin"
+$env:GOARCH = "amd64"
+go build -ldflags $ldflags -o "$distDir\hushdrop-darwin-amd64" .\cmd\hushdrop
+
+Write-Host "===> 4. Вычисление контрольных сумм SHA-256..." -ForegroundColor Cyan
+$checksumFile = "$distDir\checksums.txt"
+if (Test-Path $checksumFile) { Remove-Item $checksumFile -Force }
+
+Get-ChildItem -Path $distDir -File | Where-Object { $_.Name -ne "checksums.txt" } | ForEach-Object {
+    $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+    "$hash  $($_.Name)" | Out-File -FilePath $checksumFile -Append -Encoding ascii
+}
+
+Write-Host "===> Сборка успешно завершена в ./dist/:" -ForegroundColor Green
+Get-Content $checksumFile
