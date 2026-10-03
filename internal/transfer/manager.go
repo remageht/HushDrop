@@ -76,6 +76,9 @@ func SanitizeFilename(rawName string) string {
 		rawName = unescaped
 	}
 
+	// Normalize Windows backslashes to forward slashes for cross-platform safety
+	rawName = strings.ReplaceAll(rawName, "\\", "/")
+
 	clean := filepath.Base(rawName)
 	clean = strings.ReplaceAll(clean, "\x00", "")
 	clean = strings.ReplaceAll(clean, "..", "")
