@@ -45,3 +45,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# AI agent working files (local only, not for public repo)
+.agent/
