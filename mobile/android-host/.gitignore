@@ -1,0 +1,6 @@
+# Android build artifacts
+build/
+*.aar
+*.apk
+*.class
+*.kotlin_module

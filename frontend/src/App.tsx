@@ -3,12 +3,13 @@ import { Header } from './components/Header';
 import { PairingModal } from './components/PairingModal';
 import { SendPage } from './pages/SendPage';
 import { ReceivePage } from './pages/ReceivePage';
+import { HostPage } from './pages/HostPage';
 import { apiClient } from './api/client';
-import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home } from 'lucide-react';
+import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(apiClient.isAuthenticated());
-  const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'host'>('home');
   const [showPairing, setShowPairing] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -97,6 +98,18 @@ export const App: React.FC = () => {
             <Download className="w-4 h-4" />
             <span>Получить</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('host')}
+            className={`flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-semibold transition ${
+              activeTab === 'host'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Radio className="w-4 h-4" />
+            <span>Хост</span>
+          </button>
         </div>
 
         {/* Active View */}
@@ -173,6 +186,27 @@ export const App: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Mobile Host Promo */}
+            <div className="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Radio className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-white">Передача Телефон → Телефон без ПК</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Включите точку доступа на телефоне и запустите раздачу во вкладке «Хост».
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab('host')}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 transition shrink-0"
+              >
+                Открыть Хост
+              </button>
+            </div>
           </div>
         )}
         {activeTab === 'send' &&
@@ -205,6 +239,7 @@ export const App: React.FC = () => {
               </button>
             </div>
           ))}
+        {activeTab === 'host' && <HostPage />}
       </main>
 
       {/* Footer */}
