@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hushdrop/internal/clipboard"
 )
 
 type PairRequest struct {
@@ -20,6 +22,11 @@ type PairRequest struct {
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
+}
+
+type ClipboardRequest struct {
+	Text          string `json:"text"`
+	BurnAfterRead bool   `json:"burnAfterRead"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +147,9 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	// Wipe stored files and temporary chunks
 	s.transferManager.ClearAll()
 
+	// Clear and zeroize in-memory clipboard
+	s.clipboardManager.Clear()
+
 	respondJSON(w, http.StatusOK, map[string]string{
 		"message": "All sessions revoked, keys zeroized, and files cleared",
 	})
@@ -155,6 +165,65 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"files": files,
 	})
+}
+
+func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		item, exists := s.clipboardManager.Get()
+		if !exists {
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"text":          "",
+				"isEmpty":       true,
+				"burnAfterRead": false,
+				"updatedAt":     0,
+			})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"text":          item.Text,
+			"burnAfterRead": item.BurnAfterRead,
+			"updatedAt":     item.UpdatedAt,
+			"isEmpty":       false,
+		})
+
+	case http.MethodPost:
+		if r.ContentLength > clipboard.MaxClipboardSize {
+			respondJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "Clipboard text exceeds 1MB limit",
+			})
+			return
+		}
+
+		var req ClipboardRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "Invalid request body",
+			})
+			return
+		}
+
+		if err := s.clipboardManager.Set(req.Text, req.BurnAfterRead); err != nil {
+			respondJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"success":   true,
+			"updatedAt": time.Now().Unix(),
+		})
+
+	case http.MethodDelete:
+		s.clipboardManager.Clear()
+		respondJSON(w, http.StatusOK, map[string]string{
+			"message": "Clipboard cleared and zeroized",
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {

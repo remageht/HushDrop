@@ -42,3 +42,11 @@ export interface ActiveTransfer {
   errorMessage?: string;
   abortController?: AbortController;
 }
+
+export interface ClipboardItem {
+  text: string;
+  burnAfterRead: boolean;
+  updatedAt: number;
+  isEmpty?: boolean;
+}
+

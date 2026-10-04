@@ -3,6 +3,7 @@ import { UploadCloud, FolderUp, FileUp, AlertTriangle, ShieldCheck } from 'lucid
 import { apiClient } from '../api/client';
 import { ActiveTransfer } from '../types';
 import { TransferItem } from '../components/TransferItem';
+import { ClipboardCard } from '../components/ClipboardCard';
 
 const dangerousExts = ['.exe', '.bat', '.cmd', '.ps1', '.sh', '.msi', '.vbs', '.com'];
 
@@ -247,6 +248,8 @@ export const SendPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ClipboardCard />
     </div>
   );
 };

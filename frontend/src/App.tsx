@@ -4,6 +4,7 @@ import { PairingModal } from './components/PairingModal';
 import { SendPage } from './pages/SendPage';
 import { ReceivePage } from './pages/ReceivePage';
 import { HostPage } from './pages/HostPage';
+import { ClipboardCard } from './components/ClipboardCard';
 import { apiClient } from './api/client';
 import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio } from 'lucide-react';
 
@@ -168,6 +169,8 @@ export const App: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {isAuthenticated && <ClipboardCard />}
 
             <div className="p-5 rounded-2xl bg-slate-900/30 border border-slate-800/60 text-xs text-slate-400 space-y-3 leading-relaxed">
               <p className="font-semibold text-slate-200 text-sm">Как это работает:</p>

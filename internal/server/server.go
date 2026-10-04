@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hushdrop/internal/clipboard"
 	"hushdrop/internal/config"
 	"hushdrop/internal/crypto"
 	"hushdrop/internal/pair"
@@ -16,13 +17,14 @@ import (
 )
 
 type Server struct {
-	config          *config.Config
-	tlsInfo         *crypto.TLSInfo
-	pairManager     *pair.Manager
-	transferManager *transfer.Manager
-	limiter         *ipRateLimiter
-	httpServer      *http.Server
-	certHTTPServer  *http.Server
+	config           *config.Config
+	tlsInfo          *crypto.TLSInfo
+	pairManager      *pair.Manager
+	transferManager  *transfer.Manager
+	clipboardManager *clipboard.Manager
+	limiter          *ipRateLimiter
+	httpServer       *http.Server
+	certHTTPServer   *http.Server
 }
 
 // tlsErrorFilterWriter suppresses expected browser noise like EOF, bad/unknown cert, and aborts
@@ -46,11 +48,12 @@ func (w *tlsErrorFilterWriter) Write(p []byte) (n int, err error) {
 
 func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm *transfer.Manager) *Server {
 	s := &Server{
-		config:          cfg,
-		tlsInfo:         tlsInfo,
-		pairManager:     pm,
-		transferManager: tm,
-		limiter:         newRateLimiter(cfg.RateLimitPerMinute, time.Minute),
+		config:           cfg,
+		tlsInfo:          tlsInfo,
+		pairManager:      pm,
+		transferManager:  tm,
+		clipboardManager: clipboard.NewManager(),
+		limiter:          newRateLimiter(cfg.RateLimitPerMinute, time.Minute),
 	}
 
 	mux := http.NewServeMux()
@@ -62,6 +65,7 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	mux.HandleFunc("/api/pair/refresh", s.handleRefresh)
 	mux.HandleFunc("/api/revoke", s.handleRevoke)
 	mux.HandleFunc("/api/files", s.handleFilesList)
+	mux.HandleFunc("/api/clipboard", s.handleClipboard)
 	mux.HandleFunc("/api/upload", s.handleUploadChunk)
 	mux.HandleFunc("/api/download", s.handleDownload)
 	mux.HandleFunc("/cert", s.handleCertDownload)

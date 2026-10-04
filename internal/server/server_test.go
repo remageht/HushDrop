@@ -289,3 +289,84 @@ func TestServer_RangeDownloadAndRevoke(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized after revoke, got %d", rec.Code)
 	}
 }
+
+func TestServer_Clipboard(t *testing.T) {
+	srv, pm, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	clientIP := "192.168.1.100:45678"
+	pin, token, _ := pm.GetActivePairingDetails()
+
+	// Pair client
+	pairBody, _ := json.Marshal(map[string]string{"pin": pin, "token": token})
+	req := httptest.NewRequest(http.MethodPost, "/api/pair", bytes.NewReader(pairBody))
+	req.RemoteAddr = clientIP
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	var pairResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &pairResp)
+	accessToken := pairResp["accessToken"].(string)
+
+	// 1. Initial GET /api/clipboard -> empty
+	req = httptest.NewRequest(http.MethodGet, "/api/clipboard", nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	var getResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if getResp["isEmpty"] != true {
+		t.Fatalf("expected isEmpty true, got %+v", getResp)
+	}
+
+	// 2. POST /api/clipboard -> set text
+	clipPayload, _ := json.Marshal(map[string]interface{}{
+		"text":          "Secret WiFi password: HushDrop2026!",
+		"burnAfterRead": true,
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/clipboard", bytes.NewReader(clipPayload))
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	// 3. GET /api/clipboard -> returns text and burns
+	req = httptest.NewRequest(http.MethodGet, "/api/clipboard", nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if getResp["text"] != "Secret WiFi password: HushDrop2026!" {
+		t.Fatalf("unexpected text: %v", getResp["text"])
+	}
+	if getResp["burnAfterRead"] != true {
+		t.Fatalf("expected burnAfterRead true")
+	}
+
+	// 4. Second GET -> must be burned and empty
+	req = httptest.NewRequest(http.MethodGet, "/api/clipboard", nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &getResp)
+	if getResp["isEmpty"] != true {
+		t.Fatalf("expected isEmpty true after burn-after-read, got %+v", getResp)
+	}
+}
+

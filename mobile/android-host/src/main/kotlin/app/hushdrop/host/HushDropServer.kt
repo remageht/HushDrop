@@ -36,6 +36,10 @@ class HushDropServer(
     private var httpsServerSocket: SSLServerSocket? = null
     private var httpServerSocket: ServerSocket? = null
 
+    private var clipboardBytes: ByteArray? = null
+    private var clipboardBurnAfterRead: Boolean = false
+    private var clipboardUpdatedAt: Long = 0L
+
     companion object {
         fun maskIp(ip: String): String {
             val parts = ip.split(".")
@@ -239,6 +243,9 @@ class HushDropServer(
                 path == "/api/pair/refresh" && method == "POST" -> handleRefresh(input, output, headers, clientIp)
                 path == "/api/revoke" && method == "POST" -> handleRevoke(output, clientIp)
                 path == "/api/files" && method == "GET" -> handleFilesList(output)
+                path == "/api/clipboard" && method == "GET" -> handleGetClipboard(output)
+                path == "/api/clipboard" && method == "POST" -> handlePostClipboard(input, output, headers)
+                path == "/api/clipboard" && method == "DELETE" -> handleDeleteClipboard(output)
                 path == "/api/upload" && method == "POST" -> handleUpload(input, output, headers)
                 path == "/api/download" && method == "GET" -> handleDownload(output, queryString, headers)
                 path == "/cert" && method == "GET" -> handleCertDownload(output)
@@ -346,6 +353,13 @@ class HushDropServer(
         pairManager.revokeAll()
         transferManager.clearAll()
 
+        synchronized(this) {
+            clipboardBytes?.fill(0)
+            clipboardBytes = null
+            clipboardBurnAfterRead = false
+            clipboardUpdatedAt = 0L
+        }
+
         val json = JSONObject().apply {
             put("message", "All sessions revoked, keys zeroized, and files cleared")
         }
@@ -371,6 +385,88 @@ class HushDropServer(
             })
         }
         val resp = JSONObject().apply { put("files", jsonArray) }
+        sendResponse(out, 200, "OK", "application/json", resp.toString())
+    }
+
+    private fun handleGetClipboard(out: OutputStream) {
+        synchronized(this) {
+            val bytes = clipboardBytes
+            if (bytes == null || bytes.isEmpty()) {
+                val resp = JSONObject().apply {
+                    put("text", "")
+                    put("isEmpty", true)
+                    put("burnAfterRead", false)
+                    put("updatedAt", 0)
+                }
+                sendResponse(out, 200, "OK", "application/json", resp.toString())
+                return
+            }
+
+            val text = String(bytes, StandardCharsets.UTF_8)
+            val burn = clipboardBurnAfterRead
+            val updated = clipboardUpdatedAt
+
+            if (burn) {
+                bytes.fill(0)
+                clipboardBytes = null
+                clipboardBurnAfterRead = false
+                clipboardUpdatedAt = 0L
+            }
+
+            val resp = JSONObject().apply {
+                put("text", text)
+                put("burnAfterRead", burn)
+                put("updatedAt", updated)
+                put("isEmpty", false)
+            }
+            sendResponse(out, 200, "OK", "application/json", resp.toString())
+        }
+    }
+
+    private fun handlePostClipboard(input: InputStream, out: OutputStream, headers: Map<String, String>) {
+        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+        if (contentLength > 1024 * 1024) {
+            val resp = JSONObject().apply { put("error", "Clipboard text exceeds 1MB limit") }
+            sendResponse(out, 413, "Payload Too Large", "application/json", resp.toString())
+            return
+        }
+
+        val bodyStr = readBodyString(input, contentLength)
+        val bodyJson = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+        val text = bodyJson.optString("text", "")
+        val burn = bodyJson.optBoolean("burnAfterRead", false)
+
+        val rawBytes = text.toByteArray(StandardCharsets.UTF_8)
+        if (rawBytes.size > 1024 * 1024) {
+            val resp = JSONObject().apply { put("error", "Clipboard text exceeds 1MB limit") }
+            sendResponse(out, 413, "Payload Too Large", "application/json", resp.toString())
+            return
+        }
+
+        synchronized(this) {
+            clipboardBytes?.fill(0)
+            clipboardBytes = rawBytes
+            clipboardBurnAfterRead = burn
+            clipboardUpdatedAt = System.currentTimeMillis() / 1000L
+        }
+
+        val resp = JSONObject().apply {
+            put("success", true)
+            put("updatedAt", clipboardUpdatedAt)
+        }
+        sendResponse(out, 200, "OK", "application/json", resp.toString())
+    }
+
+    private fun handleDeleteClipboard(out: OutputStream) {
+        synchronized(this) {
+            clipboardBytes?.fill(0)
+            clipboardBytes = null
+            clipboardBurnAfterRead = false
+            clipboardUpdatedAt = 0L
+        }
+        val resp = JSONObject().apply {
+            put("message", "Clipboard cleared and zeroized")
+        }
         sendResponse(out, 200, "OK", "application/json", resp.toString())
     }
 

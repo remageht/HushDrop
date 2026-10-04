@@ -1,4 +1,4 @@
-import { FileItem, PairInfoResponse, PairSession } from '../types';
+import { FileItem, PairInfoResponse, PairSession, ClipboardItem } from '../types';
 
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
 
@@ -318,6 +318,31 @@ class ApiClient {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  }
+
+  public async getClipboard(): Promise<ClipboardItem> {
+    return this.request<ClipboardItem>('/api/clipboard', {
+      method: 'GET',
+    });
+  }
+
+  public async setClipboard(
+    text: string,
+    burnAfterRead: boolean = false
+  ): Promise<{ success: boolean; updatedAt: number }> {
+    return this.request<{ success: boolean; updatedAt: number }>('/api/clipboard', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text, burnAfterRead }),
+    });
+  }
+
+  public async clearClipboard(): Promise<void> {
+    await this.request('/api/clipboard', {
+      method: 'DELETE',
+    });
   }
 }
 
