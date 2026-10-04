@@ -276,7 +276,7 @@ class HushDropServer(
     }
 
     private fun handlePairInfo(out: OutputStream) {
-        val (pin, token, expiresAt) = pairManager.getActivePairingDetails()
+        val (_, token, expiresAt) = pairManager.getActivePairingDetails()
         val remaining = maxOf(0L, (expiresAt - System.currentTimeMillis()) / 1000L).toInt()
 
         val json = JSONObject().apply {
@@ -302,7 +302,7 @@ class HushDropServer(
 
         val pin = bodyJson.optString("pin", "")
         val token = bodyJson.optString("token", "")
-        val clientPubKey = bodyJson.optString("clientPubKey", null)
+        val clientPubKey: String? = if (bodyJson.has("clientPubKey")) bodyJson.getString("clientPubKey") else null
 
         try {
             val result = pairManager.verifyPairing(
