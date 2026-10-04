@@ -22,7 +22,7 @@ if (!(Test-Path $distDir)) {
 }
 
 $env:CGO_ENABLED = "0"
-$version = "0.1.0"
+$version = "0.3.0"
 $ldflags = "-s -w -X main.version=$version"
 
 # Windows amd64
