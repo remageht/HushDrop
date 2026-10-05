@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-10-05
+
+### Added
+- **Animated SVG Intro Splash**: Interactive 1.6-second brand intro animation on cold start featuring circle path drawing, smooth arrow entry, base line animation, and emerald shimmer highlight.
+- **Graceful Loading & Fallback**: Responsive progress bar for loads exceeding 3 seconds, timeout protection (reload prompt after 8 seconds), and full `prefers-reduced-motion` accessibility support.
+- **Tauri Desktop Splashscreen**: Centered 400x400 borderless splashscreen window matching the animated logo until Go backend service is fully ready.
+- **Zero-Flicker Native Transition**: Synchronized native splash window background (`#0b0f19`) and 300ms fade-out duration across Capacitor Android and Tauri wrappers.
+
+### Changed
+- Bumped unified project version to `0.3.3` (Android `versionCode 33`).
+
+---
+
 ## [0.3.2] - 2026-10-05
 
 ### Security & Hardening
