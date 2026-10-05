@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-05
+
+### Security & Hardening
+- **Android Host Service Isolation**: Declared `HostForegroundService` with `android:exported="false"`, enforcing strict internal UI/plugin control and preventing unauthorized intent invocation.
+- **Permission Minimization**: Completely removed broad storage and media permissions (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE`). System share targets now stream directly via `ContentResolver` delegate `grant-uri-permission`.
+- **Cleartext Boundary Restriction**: Introduced `networkSecurityConfig` restricting cleartext communication strictly to localhost loopback helper endpoints.
+- **Log Privacy**: Eliminated 6-digit PIN and raw IP addresses from Android `Log.i` logcat output (IPs are masked, PIN is shown exclusively in user-facing notifications).
+- **Distribution Data Isolation**: Build scripts (`scripts/build.ps1`) verify zero `.key`, `.pem`, `.crt`, `.log`, or `.env` files exist in release staging directories; `./data/` runtime directories are isolated.
+
+### Fixed
+- **Self-DoS & Throttling Fix**: Unmetered public endpoints (`GET /`, `/health`, `/api/pair/info`) so health checks and pairing discovery never consume rate-limit quotas on Go core and Android embedded servers.
+- **Frontend Polling Guards**: `HostPage` and `ReceivePage` now strictly guard file listing polling behind `isAuthenticated()`, preventing unauthenticated clients from burning IP rate limits.
+- **Android 8+ Service Lifecycle**: Handled `stopHost` via `startForegroundService` on Android O+ to prevent background `IllegalStateException`.
+- **Zero Raw Fetch Calls**: Replaced raw `fetch()` calls in `HostPage` and `SendPage` with centralized `apiClient.listFiles()` and `apiClient.fetchLocalBlob()`.
+- **Sharing Bridge Consolidation**: Unified system share target handling inside `mobile/src/share.ts` without inline duplication in `SendPage`.
+
+### Changed
+- Unified version bump to `v0.3.2` across Go core, Desktop Tauri (`0.3.2`), Android APK (`versionCode 32`, `versionName 0.3.2`), and Web PWA.
+
+---
+
 ## [0.3.1] - 2026-10-05
 
 ### Added

@@ -18,7 +18,7 @@ import (
 	"hushdrop/internal/transfer"
 )
 
-var version = "0.3.1"
+var version = "0.3.2"
 
 func main() {
 	cfg, err := config.LoadConfig()

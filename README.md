@@ -6,7 +6,7 @@
 
 Приватная передача файлов телефон ↔ ПК в локальной сети (Wi-Fi) без интернета, мессенджеров, сторонних серверов и облачных хранилищ. Телефон ↔ телефон — через общий хаб на ПК: один загружает через «Отправить», второй забирает через «Получить».
 
-[![Release](https://img.shields.io/badge/release-v0.3.1-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.2-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
 [![Status](https://img.shields.io/badge/status-alpha-orange?style=flat)](#дисклеймер-безопасности)
 [![Go Version](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://react.dev)
@@ -14,7 +14,7 @@
 
 > [!WARNING]
 > ### Дисклеймер безопасности (Alpha)
-> Проект находится в стадии активной альфа-версии (`v0.3.1`). Предназначен исключительно для локальных сетей (домашний Wi-Fi, локальная офисная сеть, мобильная точка доступа). Не выставляйте порт сервиса наружу в глобальный интернет без VPN. Перед загрузкой файлов сверяйте отпечаток TLS.
+> Проект находится в стадии активной альфа-версии (`v0.3.2`). Предназначен исключительно для локальных сетей (домашний Wi-Fi, локальная офисная сеть, мобильная точка доступа). Не выставляйте порт сервиса наружу в глобальный интернет без VPN. Перед загрузкой файлов сверяйте отпечаток TLS.
 
 ---
 

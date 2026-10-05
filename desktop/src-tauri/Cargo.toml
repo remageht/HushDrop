@@ -1,6 +1,6 @@
 [package]
 name = "hushdrop-desktop"
-version = "0.3.1"
+version = "0.3.2"
 description = "HushDrop Desktop Tauri 2 Portable Wrapper"
 authors = ["HushDrop Team"]
 license = "MIT"
