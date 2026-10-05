@@ -93,7 +93,6 @@ object CertificateGenerator {
         val signer = JcaContentSignerBuilder("SHA256withECDSA").build(keyPair.private)
         val certHolder = certBuilder.build(signer)
         val certificate: X509Certificate = JcaX509CertificateConverter()
-            .setProvider("BC")
             .getCertificate(certHolder)
 
         // 3. Calculate SHA-256 Fingerprint (AA:BB:CC:...)

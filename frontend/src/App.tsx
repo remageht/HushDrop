@@ -25,6 +25,15 @@ export const App: React.FC = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Auto-open pairing modal if token query parameter is provided (e.g. from QR scan)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('token')) {
+      setShowPairing(true);
+    }
+    if (params.get('tab') === 'host') {
+      setActiveTab('host');
+    }
+
     // Register service worker if supported
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {
