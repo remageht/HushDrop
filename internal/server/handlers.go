@@ -33,7 +33,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"service":   "HushDrop",
-		"version":   "0.1.0",
+		"version":   "0.3.1",
 		"timestamp": time.Now().Unix(),
 	})
 }
