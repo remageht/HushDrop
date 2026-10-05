@@ -340,12 +340,32 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Open splashscreen window (400x400) with animated SVG logo
+            let splash_html = include_str!("../../../frontend/public/splashscreen.html");
+            let splash_encoded = utf8_percent_encode(splash_html, NON_ALPHANUMERIC).to_string();
+            let splash_data_url = format!("data:text/html;charset=utf-8,{}", splash_encoded);
+            if let Ok(parsed_splash_url) = url::Url::parse(&splash_data_url) {
+                let _ = WebviewWindowBuilder::new(
+                    app,
+                    "splashscreen",
+                    WebviewUrl::External(parsed_splash_url),
+                )
+                .title("HushDrop")
+                .inner_size(400.0, 400.0)
+                .resizable(false)
+                .decorations(false)
+                .center()
+                .always_on_top(true)
+                .build();
+            }
+
             // Poll Go server readiness before revealing main window
             let check_client = http_client.clone();
             let check_url = format!("{}/health", server_url);
             let handle_clone = app_handle.clone();
 
             std::thread::spawn(move || {
+                let start = std::time::Instant::now();
                 for _ in 0..50 {
                     if check_client.get(&check_url).send().is_ok() {
                         break;
@@ -353,9 +373,18 @@ pub fn run() {
                     std::thread::sleep(Duration::from_millis(100));
                 }
 
+                // Minimum 1.6s display to let the intro animation finish cleanly
+                let elapsed = start.elapsed();
+                if elapsed < Duration::from_millis(1600) {
+                    std::thread::sleep(Duration::from_millis(1600) - elapsed);
+                }
+
                 if let Some(window) = handle_clone.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
+                }
+                if let Some(splash_window) = handle_clone.get_webview_window("splashscreen") {
+                    let _ = splash_window.close();
                 }
             });
 

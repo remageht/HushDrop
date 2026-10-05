@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HushDrop</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0b0f19;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .boot-logo-wrapper {
+      position: relative;
+      width: 110px;
+      height: 110px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .splash-svg {
+      width: 110px;
+      height: 110px;
+      display: block;
+    }
+    .splash-circle-draw {
+      stroke-dasharray: 240;
+      stroke-dashoffset: 240;
+      opacity: 0;
+      animation: splashCircleDraw 0.85s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+    }
+    @keyframes splashCircleDraw {
+      0% { stroke-dashoffset: 240; opacity: 0.2; }
+      20% { opacity: 1; }
+      100% { stroke-dashoffset: 0; opacity: 0.85; }
+    }
+    .splash-arrow-group {
+      transform-origin: 50px 43px;
+      opacity: 0;
+      animation: splashArrowFall 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.45s forwards;
+    }
+    @keyframes splashArrowFall {
+      0% { transform: translateY(-26px); opacity: 0; }
+      40% { opacity: 1; }
+      85% { transform: translateY(2px); }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    .splash-arrow {
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      animation: splashArrowDraw 0.55s ease-out 0.45s forwards;
+    }
+    @keyframes splashArrowDraw {
+      0% { stroke-dashoffset: 100; }
+      100% { stroke-dashoffset: 0; }
+    }
+    .splash-baseline {
+      stroke-dasharray: 40;
+      stroke-dashoffset: 40;
+      opacity: 0;
+      animation: splashLineDraw 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.95s forwards;
+    }
+    @keyframes splashLineDraw {
+      0% { stroke-dashoffset: 40; opacity: 0; }
+      25% { opacity: 1; }
+      100% { stroke-dashoffset: 0; opacity: 1; }
+    }
+    .splash-symbol {
+      animation: splashShimmer 0.35s ease-in-out 1.3s 1 normal forwards,
+                 splashIdlePulse 2.2s ease-in-out 1.7s infinite alternate;
+    }
+    @keyframes splashShimmer {
+      0% { filter: drop-shadow(0 0 0 rgba(16, 185, 129, 0)) brightness(1); }
+      50% { filter: drop-shadow(0 0 16px rgba(16, 185, 129, 0.95)) drop-shadow(0 0 4px #34d399) brightness(1.4); }
+      100% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.25)) brightness(1); }
+    }
+    @keyframes splashIdlePulse {
+      0% { transform: translateY(0); filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.25)); }
+      100% { transform: translateY(-2px); filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.5)); }
+    }
+    .boot-caption {
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0;
+      animation: bootCaptionFade 0.5s ease-out 0.8s forwards;
+    }
+    @keyframes bootCaptionFade {
+      0% { opacity: 0; transform: translateY(6px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .boot-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+    .boot-sub {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+      font-weight: 500;
+    }
+    .boot-progress {
+      width: 140px;
+      height: 3px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 20px;
+      opacity: 0;
+      animation: bootShowProgress 0.4s ease 3s forwards;
+    }
+    @keyframes bootShowProgress {
+      to { opacity: 1; }
+    }
+    .boot-progress-bar {
+      width: 45%;
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399, #10b981);
+      border-radius: 999px;
+      animation: bootIndeterminate 1.4s ease-in-out infinite;
+    }
+    @keyframes bootIndeterminate {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(120%); }
+      100% { transform: translateX(320%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .splash-circle-draw,
+      .splash-arrow-group,
+      .splash-arrow,
+      .splash-baseline,
+      .splash-symbol,
+      .boot-caption,
+      .boot-progress,
+      .boot-progress-bar {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
+        stroke-dashoffset: 0 !important;
+        opacity: 1 !important;
+        filter: none !important;
+      }
+      .boot-progress {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="boot-logo-wrapper">
+    <svg class="splash-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="110" height="110" aria-label="HushDrop">
+      <defs>
+        <linearGradient id="splash-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#10b981" />
+          <stop offset="100%" stop-color="#065f46" />
+        </linearGradient>
+      </defs>
+      <rect width="100" height="100" rx="24" fill="#0b0f19" />
+      <circle cx="50" cy="50" r="38" fill="none" stroke="#1e293b" stroke-width="2" />
+      <circle class="splash-circle-draw" cx="50" cy="50" r="38" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" />
+      <g class="splash-symbol">
+        <g class="splash-arrow-group">
+          <path class="splash-arrow" d="M50 24 L50 62 M34 46 L50 62 L66 46" stroke="url(#splash-grad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        </g>
+        <path class="splash-baseline" d="M30 74 L70 74" stroke="#10b981" stroke-width="7" stroke-linecap="round" />
+      </g>
+    </svg>
+  </div>
+  <div class="boot-caption">
+    <span class="boot-title">HushDrop</span>
+    <span class="boot-sub">Твои файлы. Твоя сеть.</span>
+  </div>
+  <div class="boot-progress">
+    <div class="boot-progress-bar"></div>
+  </div>
+</body>
+</html>

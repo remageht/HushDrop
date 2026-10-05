@@ -15,6 +15,28 @@ export const App: React.FC = () => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   useEffect(() => {
+    // Dismiss animated boot splash ensuring 1.6s intro sequence completes (unless prefers-reduced-motion)
+    const splash = document.getElementById('boot-splash');
+    let splashTimer: any;
+    let removeTimer: any;
+    if (splash) {
+      if ((window as any).__hushdropBootTimer) {
+        clearTimeout((window as any).__hushdropBootTimer);
+      }
+      const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const startTime = (window as any).__hushdropBootStart || performance.now();
+      const elapsed = performance.now() - startTime;
+      const minDuration = prefersReducedMotion ? 0 : 1600;
+      const remaining = Math.max(0, minDuration - elapsed);
+
+      splashTimer = setTimeout(() => {
+        splash.classList.add('done');
+        removeTimer = setTimeout(() => {
+          splash.remove();
+        }, 320);
+      }, remaining);
+    }
+
     const unsub = apiClient.subscribeAuth((authed) => {
       setIsAuthenticated(authed);
     });
@@ -42,6 +64,8 @@ export const App: React.FC = () => {
     }
 
     return () => {
+      if (splashTimer) clearTimeout(splashTimer);
+      if (removeTimer) clearTimeout(removeTimer);
       unsub();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
