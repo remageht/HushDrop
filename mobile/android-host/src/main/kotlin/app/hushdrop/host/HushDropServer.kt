@@ -154,23 +154,10 @@ class HushDropServer(
                 return
             }
 
-            // 2. Rate limit check (20/min per IP)
-            if (!pairManager.allowRateLimit(clientIp)) {
-                Log.w(tag, "[RATE_LIMIT] Throttled masked IP ${maskIp(clientIp)}")
-                val out = socket.getOutputStream()
-                val headers = listOf("Retry-After: 60")
-                sendResponse(
-                    out, 429, "Too Many Requests", "application/json",
-                    "{\"error\":\"Too many requests. Please slow down.\"}", headers
-                )
-                socket.close()
-                return
-            }
-
             val input = BufferedInputStream(socket.getInputStream())
             val output = BufferedOutputStream(socket.getOutputStream())
 
-            // 3. Parse HTTP request line & headers
+            // 2. Parse HTTP request line & headers
             val requestLine = readLine(input) ?: run { socket.close(); return }
             val parts = requestLine.split(" ")
             if (parts.size < 2) { socket.close(); return }
@@ -190,6 +177,20 @@ class HushDropServer(
                     val value = line.substring(colonIdx + 1).trim()
                     headers[key] = value
                 }
+            }
+
+            // 3. Rate limit check (20/min per IP) - unmetered for GET /, /health, /api/pair/info, static
+            val isUnmetered = path == "/" || path == "/health" || path == "/api/pair/info" || !path.startsWith("/api/")
+            if (!isUnmetered && !pairManager.allowRateLimit(clientIp)) {
+                Log.w(tag, "[RATE_LIMIT] Throttled masked IP ${maskIp(clientIp)} on $path")
+                val out = socket.getOutputStream()
+                val retryHeaders = listOf("Retry-After: 60")
+                sendResponse(
+                    out, 429, "Too Many Requests", "application/json",
+                    "{\"error\":\"Too many requests. Please slow down.\"}", retryHeaders
+                )
+                socket.close()
+                return
             }
 
             // 4. Handle HTTP helper server requests (port 8080)

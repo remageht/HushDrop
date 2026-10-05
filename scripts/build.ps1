@@ -59,5 +59,14 @@ Get-ChildItem -Path $distDir -File | Where-Object { $_.Name -ne "checksums.txt" 
     "$hash  $($_.Name)" | Out-File -FilePath $checksumFile -Append -Encoding ascii
 }
 
+Write-Host "===> 5. Проверка безопасности артефактов (отсутствие .key / .pem / .env)..." -ForegroundColor Cyan
+$leakedFiles = Get-ChildItem -Path $distDir -Recurse -File -Include "*.key", "*.pem", "*.crt", "*.log", ".env*"
+if ($leakedFiles.Count -gt 0) {
+    Write-Error "КРИТИЧЕСКАЯ ОШИБКА: Обнаружены приватные ключи/логи в дистрибутиве: $($leakedFiles -join ', ')"
+    exit 1
+}
+Write-Host "   -> Проверка пройдена: ключи и боевые логи в поставку не попадают." -ForegroundColor Green
+
 Write-Host "===> Сборка успешно завершена в ./dist/:" -ForegroundColor Green
 Get-Content $checksumFile
+

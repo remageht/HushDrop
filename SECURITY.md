@@ -25,6 +25,16 @@ HushDrop is designed for **strictly localized, zero-cloud peer-to-peer file tran
    - File paths are sanitized against directory traversal (`../`, null bytes, URL encoding) and verified to remain strictly within `./data/downloads/`.
 6. **Execution Safeguards**:
    - Executable files (`.exe`, `.bat`, `.cmd`, `.ps1`, `.sh`, `.msi`) are flagged with a security badge and require explicit recipient confirmation before download.
+7. **Android Permission Minimization & System Sharing**:
+   - Broad storage permissions (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE`) are entirely removed.
+   - Incoming shared files from system gallery/file manager intents are received solely via delegate `grant-uri-permission` flags and streamed through `ContentResolver` into app-private cache storage.
+8. **Network Security Config & Cleartext Boundary**:
+   - Android `networkSecurityConfig` restricts cleartext traffic by default (`cleartextTrafficPermitted="false"`).
+   - Cleartext is permitted strictly for loopback/local developer helper port (`127.0.0.1`, `localhost`) to download initial certificates if necessary.
+   - All actual peer transfer and pairing communication occurs strictly over TLS 1.3 (`:8443`).
+9. **Distribution Security & Data Isolation**:
+   - The runtime `./data/` folder containing generated TLS keys (`cert.key`), certificates (`cert.pem`), and transfer logs is strictly untracked and never packaged in release distributions.
+   - Packaging automation (`scripts/build.ps1`) validates that release staging directories contain zero `.key`, `.pem`, `.crt`, `.log`, or `.env` files.
 
 ---
 

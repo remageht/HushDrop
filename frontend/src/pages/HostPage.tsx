@@ -104,7 +104,9 @@ export const HostPage: React.FC = () => {
 
       if (status.isRunning) {
         startPolling();
-        fetchHostedFiles(status.ip || '127.0.0.1', status.port || 8443);
+        if (apiClient.isAuthenticated()) {
+          fetchHostedFiles();
+        }
       }
     } catch (err: any) {
       // Ignore background fetch error
@@ -128,7 +130,9 @@ export const HostPage: React.FC = () => {
       const status = await getNativeHostStatus();
       setHostStatus(status);
       if (status.isRunning) {
-        fetchHostedFiles(status.ip || '127.0.0.1', status.port || 8443);
+        if (apiClient.isAuthenticated()) {
+          fetchHostedFiles();
+        }
       } else {
         stopPolling();
       }
@@ -137,18 +141,11 @@ export const HostPage: React.FC = () => {
     }
   };
 
-  const fetchHostedFiles = async (ip: string, port: number) => {
+  const fetchHostedFiles = async () => {
+    if (!apiClient.isAuthenticated()) return;
     try {
-      // Query local host server for completed files
-      const url = `https://${ip}:${port}/api/files`;
-      // Files endpoint returns public list or empty if unauthorized
-      const resp = await fetch(url).catch(() => null);
-      if (resp && resp.ok) {
-        const data = await resp.json();
-        if (data.files) {
-          setHostedFiles(data.files);
-        }
-      }
+      const files = await apiClient.listFiles();
+      setHostedFiles(files);
     } catch {
       // ignore
     }
@@ -207,9 +204,7 @@ export const HostPage: React.FC = () => {
       // When hosting on mobile, upload directly to local server session
       await apiClient.uploadFile(file, () => {});
       // Refresh files list
-      if (hostStatus.ip && hostStatus.port) {
-        await fetchHostedFiles(hostStatus.ip, hostStatus.port);
-      }
+      await fetchHostedFiles();
     } catch (err: any) {
       setError(err.message || 'Не удалось добавить файл в раздачу');
     } finally {

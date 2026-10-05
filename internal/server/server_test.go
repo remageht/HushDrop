@@ -186,19 +186,34 @@ func TestServer_RateLimit429(t *testing.T) {
 
 	clientIP := "192.168.1.170:12345"
 
-	// Limit is 20 requests per minute. Send 20 allowed requests:
-	for i := 0; i < 20; i++ {
+	// Unmetered endpoints (/health, /api/pair/info) must bypass rate limiting without consuming tokens
+	for i := 0; i < 25; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		req.RemoteAddr = clientIP
 		rec := httptest.NewRecorder()
 		srv.httpServer.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("request %d: expected 200, got %d", i+1, rec.Code)
+			t.Fatalf("unmetered request %d: expected 200, got %d", i+1, rec.Code)
 		}
 	}
 
-	// 21st request must trigger 429
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	// Metered endpoints (/api/pair) are limited to 20 requests per minute
+	for i := 0; i < 20; i++ {
+		body := strings.NewReader(`{"pin":"000000","token":"invalid"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pair", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = clientIP
+		rec := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("metered request %d: triggered 429 prematurely", i+1)
+		}
+	}
+
+	// 21st metered request must trigger 429
+	body := strings.NewReader(`{"pin":"000000","token":"invalid"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/pair", body)
+	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = clientIP
 	rec := httptest.NewRecorder()
 	srv.httpServer.Handler.ServeHTTP(rec, req)

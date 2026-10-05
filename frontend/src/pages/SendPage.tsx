@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, FolderUp, FileUp, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { apiClient } from '../api/client';
+import { initShareBridge } from '../../../mobile/src/share';
 import { ActiveTransfer } from '../types';
 import { TransferItem } from '../components/TransferItem';
 import { ClipboardCard } from '../components/ClipboardCard';
@@ -16,108 +17,14 @@ export const SendPage: React.FC = () => {
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const cap = (window as any).Capacitor;
-    const plugin = cap?.Plugins?.HushDropHost;
-    if (!plugin) return;
-
-    let isMounted = true;
-
-    const convertItemToFile = async (item: {
-      name: string;
-      size: number;
-      mime: string;
-      cachePath: string;
-      text?: string;
-    }): Promise<File | null> => {
-      try {
-        if (cap?.convertFileSrc && item.cachePath) {
-          const webUrl = cap.convertFileSrc(item.cachePath);
-          const resp = await fetch(webUrl);
-          if (resp.ok) {
-            const blob = await resp.blob();
-            return new File([blob], item.name, { type: item.mime });
-          }
-        }
-      } catch {
-        // Fallback to base64 below
-      }
-
-      try {
-        if (typeof plugin.readSharedFileBase64 === 'function' && item.cachePath) {
-          const res = await plugin.readSharedFileBase64({ path: item.cachePath });
-          if (res?.data) {
-            const byteChars = atob(res.data);
-            const byteNumbers = new Array(byteChars.length);
-            for (let i = 0; i < byteChars.length; i++) {
-              byteNumbers[i] = byteChars.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: item.mime });
-            return new File([blob], item.name, { type: item.mime });
-          }
-        }
-      } catch {
-        // Fallback to text below
-      }
-
-      if (item.text) {
-        return new File([item.text], item.name, { type: item.mime || 'text/plain' });
-      }
-
-      return null;
-    };
-
-    const handleIncomingShared = async (
-      items: Array<{ name: string; size: number; mime: string; cachePath: string; text?: string }>
-    ) => {
-      if (!items || items.length === 0 || !isMounted) return;
-
-      const filesToUpload: File[] = [];
-      for (const item of items) {
-        const file = await convertItemToFile(item);
-        if (file) {
-          filesToUpload.push(file);
-        }
-      }
-
-      if (filesToUpload.length > 0 && isMounted) {
-        processFiles(filesToUpload);
-      }
-    };
-
-    // 1. Initial check for pending shared files from cold start
-    if (typeof plugin.getSharedFiles === 'function') {
-      plugin
-        .getSharedFiles()
-        .then((res: any) => {
-          if (res?.files && res.files.length > 0) {
-            handleIncomingShared(res.files);
-          }
-        })
-        .catch(() => {});
-    }
-
-    // 2. Runtime listener for incoming share events (warm start)
-    let listenerHandle: any = null;
-    if (typeof plugin.addListener === 'function') {
-      plugin
-        .addListener('shareReceived', (data: any) => {
-          if (data?.files && data.files.length > 0) {
-            handleIncomingShared(data.files);
-          }
-        })
-        .then((h: any) => {
-          listenerHandle = h;
-        })
-        .catch(() => {});
-    }
-
-    return () => {
-      isMounted = false;
-      if (listenerHandle?.remove) {
-        listenerHandle.remove();
-      }
-    };
+    const cleanup = initShareBridge({
+      isSessionActive: () => apiClient.isAuthenticated(),
+      fetchBlob: (url) => apiClient.fetchLocalBlob(url),
+      onFilesReady: (files) => {
+        processFiles(files);
+      },
+    });
+    return cleanup;
   }, []);
 
   const isDangerous = (filename: string): boolean => {

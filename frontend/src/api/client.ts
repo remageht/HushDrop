@@ -201,6 +201,14 @@ class ApiClient {
     return res.files || [];
   }
 
+  public async fetchLocalBlob(url: string): Promise<Blob> {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Не удалось загрузить локальные данные: ${res.statusText}`);
+    }
+    return await res.blob();
+  }
+
   public async uploadChunk(
     fileId: string,
     fileName: string,

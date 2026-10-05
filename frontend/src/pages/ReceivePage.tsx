@@ -23,9 +23,31 @@ export const ReceivePage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchFiles();
-    const interval = setInterval(fetchFiles, 5000); // Poll for incoming files every 5s
-    return () => clearInterval(interval);
+    if (apiClient.isAuthenticated()) {
+      fetchFiles();
+    } else {
+      setIsLoading(false);
+    }
+
+    const interval = setInterval(() => {
+      if (apiClient.isAuthenticated()) {
+        fetchFiles();
+      }
+    }, 5000); // Poll for incoming files every 5s
+
+    const unsubscribe = apiClient.subscribeAuth((authed) => {
+      if (authed) {
+        fetchFiles();
+      } else {
+        setFiles([]);
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   const formatBytes = (bytes: number): string => {

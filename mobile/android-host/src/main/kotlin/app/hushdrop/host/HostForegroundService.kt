@@ -53,7 +53,11 @@ class HostForegroundService : Service() {
             val intent = Intent(context, HostForegroundService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 
@@ -122,7 +126,8 @@ class HostForegroundService : Service() {
             startForeground(NOTIFICATION_ID, notification)
 
             isRunning = true
-            Log.i(tag, "HostForegroundService running on https://$hostIp:8443 (PIN: $pin)")
+            val maskedIp = HushDropServer.maskIp(hostIp)
+            Log.i(tag, "HostForegroundService running on port 8443 (host: $maskedIp)")
         } catch (e: Exception) {
             Log.e(tag, "Failed to start HostForegroundService: ${e.message}", e)
             stopSelf()

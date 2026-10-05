@@ -4,9 +4,6 @@
  * and integrates with HushDropHostPlugin.
  */
 
-import { App } from '@capacitor/app';
-import { registerPlugin, PluginListenerHandle } from '@capacitor/core';
-
 export interface SharedFileItem {
   name: string;
   size: number;
@@ -19,6 +16,10 @@ export interface SharedFilesResult {
   files: SharedFileItem[];
 }
 
+export interface PluginListenerHandle {
+  remove: () => Promise<void> | void;
+}
+
 export interface HushDropSharePluginInterface {
   getSharedFiles(): Promise<SharedFilesResult>;
   clearSharedFiles(): Promise<void>;
@@ -29,7 +30,12 @@ export interface HushDropSharePluginInterface {
   ): Promise<PluginListenerHandle>;
 }
 
-export const HushDropHostShare = registerPlugin<HushDropSharePluginInterface>('HushDropHost');
+const getCapacitor = () => (typeof window !== 'undefined' ? (window as any).Capacitor : null);
+
+export const getHushDropHostPlugin = (): HushDropSharePluginInterface | null => {
+  const cap = getCapacitor();
+  return cap?.Plugins?.HushDropHost || null;
+};
 
 // Memory queue to hold shared files while user is not authenticated or pairing
 let pendingSharedQueue: SharedFileItem[] = [];
@@ -48,26 +54,29 @@ export function enqueuePendingShared(files: SharedFileItem[]): void {
 
 /**
  * Converts a native cache file path into a Web standard File object.
+ * Uses client.ts blob fetcher when provided, avoiding raw fetch in components.
  */
-export async function sharedItemToWebFile(item: SharedFileItem): Promise<File> {
-  const cap = (window as any).Capacitor;
+export async function sharedItemToWebFile(
+  item: SharedFileItem,
+  fetchBlob?: (url: string) => Promise<Blob>
+): Promise<File> {
+  const cap = getCapacitor();
+  const plugin = getHushDropHostPlugin();
+
   if (cap && typeof cap.convertFileSrc === 'function' && item.cachePath) {
     try {
       const src = cap.convertFileSrc(item.cachePath);
-      const res = await fetch(src);
-      if (res.ok) {
-        const blob = await res.blob();
-        return new File([blob], item.name, { type: item.mime });
-      }
+      const blob = fetchBlob ? await fetchBlob(src) : await (await fetch(src)).blob();
+      return new File([blob], item.name, { type: item.mime });
     } catch {
       // Fallback below
     }
   }
 
   // Fallback via readSharedFileBase64 if available
-  if (HushDropHostShare.readSharedFileBase64 && item.cachePath) {
+  if (plugin && typeof plugin.readSharedFileBase64 === 'function' && item.cachePath) {
     try {
-      const { data } = await HushDropHostShare.readSharedFileBase64({ path: item.cachePath });
+      const { data } = await plugin.readSharedFileBase64({ path: item.cachePath });
       const byteChars = atob(data);
       const byteNumbers = new Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) {
@@ -98,7 +107,10 @@ export function initShareBridge(options: {
   onFilesReady: (files: File[]) => void;
   onWaitingForAuth?: (pendingItems: SharedFileItem[]) => void;
   onDeepLink?: (url: string) => void;
+  fetchBlob?: (url: string) => Promise<Blob>;
 }): () => void {
+  const cap = getCapacitor();
+  const plugin = getHushDropHostPlugin();
   const cleanups: Array<() => void> = [];
 
   const processIncomingItems = async (items: SharedFileItem[]) => {
@@ -115,7 +127,7 @@ export function initShareBridge(options: {
     const converted: File[] = [];
     for (const item of items) {
       try {
-        const file = await sharedItemToWebFile(item);
+        const file = await sharedItemToWebFile(item, options.fetchBlob);
         converted.push(file);
       } catch (err) {
         console.error('Ошибка преобразования расшаренного файла:', err);
@@ -128,33 +140,42 @@ export function initShareBridge(options: {
   };
 
   // 1. Listen for App URL open events (deep links)
-  App.addListener('appUrlOpen', (event) => {
-    if (options.onDeepLink) {
-      options.onDeepLink(event.url);
-    }
-  }).then((handle) => {
-    cleanups.push(() => handle.remove());
-  });
+  const appPlugin = cap?.Plugins?.App;
+  if (appPlugin && typeof appPlugin.addListener === 'function') {
+    appPlugin.addListener('appUrlOpen', (event: any) => {
+      if (options.onDeepLink && event?.url) {
+        options.onDeepLink(event.url);
+      }
+    }).then((handle: any) => {
+      if (handle?.remove) cleanups.push(() => handle.remove());
+    }).catch(() => {});
+  }
 
   // 2. Listen for runtime shareReceived events
-  HushDropHostShare.addListener('shareReceived', (data) => {
-    if (data?.files && data.files.length > 0) {
-      processIncomingItems(data.files);
-    }
-  }).then((handle) => {
-    cleanups.push(() => handle.remove());
-  });
-
-  // 3. Cold start check: poll getSharedFiles on boot
-  HushDropHostShare.getSharedFiles()
-    .then((res) => {
-      if (res?.files && res.files.length > 0) {
-        processIncomingItems(res.files);
+  if (plugin && typeof plugin.addListener === 'function') {
+    plugin.addListener('shareReceived', (data: any) => {
+      if (data?.files && data.files.length > 0) {
+        processIncomingItems(data.files);
       }
-    })
-    .catch(() => {});
+    }).then((handle: any) => {
+      if (handle?.remove) cleanups.push(() => handle.remove());
+    }).catch(() => {});
+  }
+
+  // 3. Cold start check: query getSharedFiles on boot
+  if (plugin && typeof plugin.getSharedFiles === 'function') {
+    plugin.getSharedFiles()
+      .then((res: any) => {
+        if (res?.files && res.files.length > 0) {
+          processIncomingItems(res.files);
+        }
+      })
+      .catch(() => {});
+  }
 
   return () => {
-    cleanups.forEach((c) => c());
+    cleanups.forEach((c) => {
+      try { c(); } catch {}
+    });
   };
 }

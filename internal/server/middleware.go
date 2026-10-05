@@ -132,6 +132,14 @@ func (s *Server) lanFilterMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Do not count static frontend assets, health checks, or pairing discovery against the rate limit
+		if path == "/" || path == "/health" || path == "/api/pair/info" || !strings.HasPrefix(path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		clientIP := extractIP(r)
 
 		if !s.limiter.allow(clientIP) {
