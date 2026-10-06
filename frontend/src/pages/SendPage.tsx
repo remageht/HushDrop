@@ -15,6 +15,7 @@ export const SendPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const activeKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const cleanup = subscribeFilesReady((files) => {
@@ -44,6 +45,12 @@ export const SendPage: React.FC = () => {
 
   const startUploadQueue = (files: File[]) => {
     files.forEach((file) => {
+      const fileKey = `${file.name}-${file.size}-${file.lastModified}`;
+      if (activeKeysRef.current.has(fileKey)) {
+        return; // Deduplicate identical concurrent upload attempts
+      }
+      activeKeysRef.current.add(fileKey);
+
       const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const abortController = new AbortController();
 
@@ -85,6 +92,7 @@ export const SendPage: React.FC = () => {
           abortController.signal
         )
         .then(() => {
+          activeKeysRef.current.delete(fileKey);
           setTransfers((prev) =>
             prev.map((t) =>
               t.id === id ? { ...t, status: 'completed', progressPercent: 100 } : t
@@ -92,6 +100,7 @@ export const SendPage: React.FC = () => {
           );
         })
         .catch((err) => {
+          activeKeysRef.current.delete(fileKey);
           setTransfers((prev) =>
             prev.map((t) =>
               t.id === id

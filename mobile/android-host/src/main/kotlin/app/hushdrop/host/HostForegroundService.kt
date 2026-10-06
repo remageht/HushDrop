@@ -175,7 +175,19 @@ class HostForegroundService : Service() {
             Log.i(tag, "HostForegroundService running on port 8443 (host: $maskedIp)")
         } catch (e: Exception) {
             Log.e(tag, "Failed to start HostForegroundService: ${e.message}", e)
-            stopSelf()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    val stoppingNotification = buildStoppingNotification()
+                    startForeground(NOTIFICATION_ID, stoppingNotification)
+                } catch (ex: Exception) {
+                    Log.w(tag, "startForeground on failure cleanup: ${ex.message}")
+                }
+            }
+            try {
+                stopHostServer()
+            } catch (ex: Exception) {
+                stopSelf()
+            }
         }
     }
 

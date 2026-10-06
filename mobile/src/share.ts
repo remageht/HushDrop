@@ -62,6 +62,7 @@ function notifyPendingChanged(): void {
 
 export function clearPendingSharedQueue(): void {
   pendingSharedQueue = [];
+  queuedReadyFiles = [];
   notifyPendingChanged();
   const plugin = getHushDropHostPlugin();
   try {
@@ -174,7 +175,7 @@ export async function sharedItemToWebFile(
  */
 export function initShareBridge(options: {
   isSessionActive: () => boolean;
-  onFilesReady: (files: File[]) => void;
+  onFilesReady?: (files: File[]) => void;
   onWaitingForAuth?: (pendingItems: SharedFileItem[]) => void;
   onDeepLink?: (url: string) => void;
   fetchBlob?: (url: string) => Promise<Blob>;
@@ -205,8 +206,8 @@ export function initShareBridge(options: {
     }
 
     if (converted.length > 0) {
-      options.onFilesReady(converted);
       emitFilesReady(converted);
+      options.onFilesReady?.(converted);
     }
   };
 

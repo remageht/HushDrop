@@ -74,7 +74,8 @@ export const App: React.FC = () => {
       isSessionActive: () => apiClient.isAuthenticated(),
       fetchBlob: (url) => apiClient.fetchLocalBlob(url),
       onFilesReady: (files) => {
-        emitFilesReady(files);
+        setActiveTab('send');
+        showToast(`Добавлены ${files.length} файлов из Поделиться`);
       },
       onWaitingForAuth: (pendingItems) => {
         setPendingShareCount(pendingItems.length);
