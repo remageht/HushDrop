@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, FolderUp, FileUp, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { apiClient } from '../api/client';
-import { initShareBridge } from '../../../mobile/src/share';
+import { subscribeFilesReady } from '../../../mobile/src/share';
 import { ActiveTransfer } from '../types';
 import { TransferItem } from '../components/TransferItem';
 import { ClipboardCard } from '../components/ClipboardCard';
@@ -17,12 +17,8 @@ export const SendPage: React.FC = () => {
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const cleanup = initShareBridge({
-      isSessionActive: () => apiClient.isAuthenticated(),
-      fetchBlob: (url) => apiClient.fetchLocalBlob(url),
-      onFilesReady: (files) => {
-        processFiles(files);
-      },
+    const cleanup = subscribeFilesReady((files) => {
+      processFiles(files);
     });
     return cleanup;
   }, []);

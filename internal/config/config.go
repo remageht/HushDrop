@@ -45,7 +45,7 @@ func LoadConfig() (*Config, error) {
 		Portable:             *portableFlag,
 		MaxChunkSize:         4 * 1024 * 1024,      // 4MB max chunk size
 		MaxFileSize:          5 * 1024 * 1024 * 1024, // 5GB max file size
-		RateLimitPerMinute:   20,
+		RateLimitPerMinute:   60,
 		PinTTL:               10 * time.Minute,
 		SessionInactivityTTL: 10 * time.Minute,
 		AccessTokenTTL:       5 * time.Minute,

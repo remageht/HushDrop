@@ -179,7 +179,7 @@ class HushDropServer(
                 }
             }
 
-            // 3. Rate limit check (20/min per IP) - unmetered for GET /, /health, /api/pair/info, static
+            // 3. Rate limit check (60/min per IP) - unmetered for GET /, /health, /api/pair/info, static
             val isUnmetered = path == "/" || path == "/health" || path == "/api/pair/info" || !path.startsWith("/api/")
             if (!isUnmetered && !pairManager.allowRateLimit(clientIp)) {
                 Log.w(tag, "[RATE_LIMIT] Throttled masked IP ${maskIp(clientIp)} on $path")

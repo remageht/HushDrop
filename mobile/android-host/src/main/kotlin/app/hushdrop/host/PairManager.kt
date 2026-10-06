@@ -53,9 +53,9 @@ class PairManager(
     private val refreshIndex = ConcurrentHashMap<String, String>()       // refreshToken -> accessToken
     private val ipAttempts = ConcurrentHashMap<String, IpBanTracker>()   // IP -> tracker
 
-    // Rate Limiter: max 20 requests per 60 seconds per IP
+    // Rate Limiter: max 60 requests per 60 seconds per IP
     private val ipRateTracker = ConcurrentHashMap<String, MutableList<Long>>()
-    private val maxRequestsPerMinute = 20
+    private val maxRequestsPerMinute = 60
     private val rateWindowMs = 60 * 1000L
 
     private val cleanupExecutor = Executors.newSingleThreadScheduledExecutor()

@@ -39,17 +39,87 @@ export const getHushDropHostPlugin = (): HushDropSharePluginInterface | null => 
 
 // Memory queue to hold shared files while user is not authenticated or pairing
 let pendingSharedQueue: SharedFileItem[] = [];
+const pendingListeners = new Set<(queue: SharedFileItem[]) => void>();
 
 export function getPendingSharedQueue(): SharedFileItem[] {
   return [...pendingSharedQueue];
 }
 
+export function subscribePendingShared(listener: (queue: SharedFileItem[]) => void): () => void {
+  pendingListeners.add(listener);
+  listener([...pendingSharedQueue]);
+  return () => {
+    pendingListeners.delete(listener);
+  };
+}
+
+function notifyPendingChanged(): void {
+  const current = [...pendingSharedQueue];
+  pendingListeners.forEach((l) => {
+    try { l(current); } catch {}
+  });
+}
+
 export function clearPendingSharedQueue(): void {
   pendingSharedQueue = [];
+  notifyPendingChanged();
+  const plugin = getHushDropHostPlugin();
+  try {
+    plugin?.clearSharedFiles?.();
+  } catch {}
 }
 
 export function enqueuePendingShared(files: SharedFileItem[]): void {
   pendingSharedQueue.push(...files);
+  notifyPendingChanged();
+}
+
+/**
+ * Converts and removes all pending shared items from the queue.
+ */
+export async function drainPendingSharedFiles(
+  fetchBlob?: (url: string) => Promise<Blob>
+): Promise<File[]> {
+  const items = [...pendingSharedQueue];
+  clearPendingSharedQueue();
+  const converted: File[] = [];
+  for (const item of items) {
+    try {
+      const file = await sharedItemToWebFile(item, fetchBlob);
+      converted.push(file);
+    } catch (err) {
+      console.error('Ошибка преобразования расшаренного файла:', err);
+    }
+  }
+  return converted;
+}
+
+// Ready file listeners (for delivering files to active SendPage upload queue)
+type FilesReadyListener = (files: File[]) => void;
+const readyListeners = new Set<FilesReadyListener>();
+let queuedReadyFiles: File[] = [];
+
+export function subscribeFilesReady(listener: FilesReadyListener): () => void {
+  readyListeners.add(listener);
+  if (queuedReadyFiles.length > 0) {
+    const files = [...queuedReadyFiles];
+    queuedReadyFiles = [];
+    listener(files);
+  }
+  return () => {
+    readyListeners.delete(listener);
+  };
+}
+
+export function emitFilesReady(files: File[]): void {
+  if (files.length === 0) return;
+  if (readyListeners.size === 0) {
+    queuedReadyFiles.push(...files);
+  } else {
+    readyListeners.forEach((l) => {
+      try { l(files); } catch {}
+    });
+  }
 }
 
 /**
@@ -136,30 +206,57 @@ export function initShareBridge(options: {
 
     if (converted.length > 0) {
       options.onFilesReady(converted);
+      emitFilesReady(converted);
     }
   };
 
   // 1. Listen for App URL open events (deep links)
   const appPlugin = cap?.Plugins?.App;
   if (appPlugin && typeof appPlugin.addListener === 'function') {
-    appPlugin.addListener('appUrlOpen', (event: any) => {
-      if (options.onDeepLink && event?.url) {
-        options.onDeepLink(event.url);
+    try {
+      const handleOrPromise = appPlugin.addListener('appUrlOpen', (event: any) => {
+        if (options.onDeepLink && event?.url) {
+          options.onDeepLink(event.url);
+        }
+      });
+      if (handleOrPromise) {
+        if (typeof (handleOrPromise as any).then === 'function') {
+          (handleOrPromise as Promise<any>)
+            .then((h) => {
+              if (h?.remove) cleanups.push(() => h.remove());
+            })
+            .catch(() => {});
+        } else if (typeof (handleOrPromise as any).remove === 'function') {
+          cleanups.push(() => (handleOrPromise as any).remove());
+        }
       }
-    }).then((handle: any) => {
-      if (handle?.remove) cleanups.push(() => handle.remove());
-    }).catch(() => {});
+    } catch (err) {
+      console.warn('Failed to attach appUrlOpen listener:', err);
+    }
   }
 
   // 2. Listen for runtime shareReceived events
   if (plugin && typeof plugin.addListener === 'function') {
-    plugin.addListener('shareReceived', (data: any) => {
-      if (data?.files && data.files.length > 0) {
-        processIncomingItems(data.files);
+    try {
+      const handleOrPromise = plugin.addListener('shareReceived', (data: any) => {
+        if (data?.files && data.files.length > 0) {
+          processIncomingItems(data.files);
+        }
+      });
+      if (handleOrPromise) {
+        if (typeof (handleOrPromise as any).then === 'function') {
+          (handleOrPromise as Promise<any>)
+            .then((h) => {
+              if (h?.remove) cleanups.push(() => h.remove());
+            })
+            .catch(() => {});
+        } else if (typeof (handleOrPromise as any).remove === 'function') {
+          cleanups.push(() => (handleOrPromise as any).remove());
+        }
       }
-    }).then((handle: any) => {
-      if (handle?.remove) cleanups.push(() => handle.remove());
-    }).catch(() => {});
+    } catch (err) {
+      console.warn('Failed to attach shareReceived listener:', err);
+    }
   }
 
   // 3. Cold start check: query getSharedFiles on boot

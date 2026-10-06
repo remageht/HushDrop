@@ -42,7 +42,7 @@ func setupTestServer(t *testing.T) (*Server, *pair.Manager, *transfer.Manager, f
 		TempDir:              tempDir,
 		MaxChunkSize:         4 * 1024 * 1024,      // 4MB
 		MaxFileSize:          5 * 1024 * 1024 * 1024, // 5GB
-		RateLimitPerMinute:   20,
+		RateLimitPerMinute:   60,
 		PinTTL:               10 * time.Minute,
 		SessionInactivityTTL: 10 * time.Minute,
 		AccessTokenTTL:       5 * time.Minute,
@@ -197,8 +197,8 @@ func TestServer_RateLimit429(t *testing.T) {
 		}
 	}
 
-	// Metered endpoints (/api/pair) are limited to 20 requests per minute
-	for i := 0; i < 20; i++ {
+	// Metered endpoints (/api/pair) are limited to 60 requests per minute
+	for i := 0; i < 60; i++ {
 		body := strings.NewReader(`{"pin":"000000","token":"invalid"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/pair", body)
 		req.Header.Set("Content-Type", "application/json")
@@ -210,7 +210,7 @@ func TestServer_RateLimit429(t *testing.T) {
 		}
 	}
 
-	// 21st metered request must trigger 429
+	// 61st metered request must trigger 429
 	body := strings.NewReader(`{"pin":"000000","token":"invalid"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/pair", body)
 	req.Header.Set("Content-Type", "application/json")

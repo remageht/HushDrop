@@ -6,13 +6,42 @@ import { ReceivePage } from './pages/ReceivePage';
 import { HostPage } from './pages/HostPage';
 import { ClipboardCard } from './components/ClipboardCard';
 import { apiClient } from './api/client';
-import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio } from 'lucide-react';
+import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio, CheckCircle } from 'lucide-react';
+import {
+  initShareBridge,
+  getPendingSharedQueue,
+  subscribePendingShared,
+  clearPendingSharedQueue,
+  drainPendingSharedFiles,
+  emitFilesReady,
+} from '../../mobile/src/share';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(apiClient.isAuthenticated());
   const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'host'>('home');
   const [showPairing, setShowPairing] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [pendingShareCount, setPendingShareCount] = useState<number>(getPendingSharedQueue().length);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((cur) => (cur === msg ? null : cur));
+    }, 4000);
+  };
+
+  const drainSharedQueue = async () => {
+    const count = getPendingSharedQueue().length;
+    if (count > 0) {
+      const files = await drainPendingSharedFiles((url) => apiClient.fetchLocalBlob(url));
+      if (files.length > 0) {
+        setActiveTab('send');
+        emitFilesReady(files);
+        showToast(`Добавлены ${files.length} файлов из Поделиться`);
+      }
+    }
+  };
 
   useEffect(() => {
     // Dismiss animated boot splash ensuring 1.6s intro sequence completes (unless prefers-reduced-motion)
@@ -37,8 +66,26 @@ export const App: React.FC = () => {
       }, remaining);
     }
 
+    const unsubPending = subscribePendingShared((queue) => {
+      setPendingShareCount(queue.length);
+    });
+
+    const cleanupShareBridge = initShareBridge({
+      isSessionActive: () => apiClient.isAuthenticated(),
+      fetchBlob: (url) => apiClient.fetchLocalBlob(url),
+      onFilesReady: (files) => {
+        emitFilesReady(files);
+      },
+      onWaitingForAuth: (pendingItems) => {
+        setPendingShareCount(pendingItems.length);
+      },
+    });
+
     const unsub = apiClient.subscribeAuth((authed) => {
       setIsAuthenticated(authed);
+      if (authed) {
+        drainSharedQueue();
+      }
     });
 
     const handleOnline = () => setIsOffline(false);
@@ -67,6 +114,8 @@ export const App: React.FC = () => {
       if (splashTimer) clearTimeout(splashTimer);
       if (removeTimer) clearTimeout(removeTimer);
       unsub();
+      unsubPending();
+      cleanupShareBridge();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -88,9 +137,10 @@ export const App: React.FC = () => {
 
       {!isAuthenticated && showPairing && (
         <PairingModal
-          onSuccess={() => {
+          onSuccess={async () => {
             setIsAuthenticated(true);
             setShowPairing(false);
+            await drainSharedQueue();
           }}
           onClose={() => setShowPairing(false)}
         />
@@ -249,12 +299,26 @@ export const App: React.FC = () => {
           (isAuthenticated ? (
             <SendPage />
           ) : (
-            <div className="p-8 rounded-2xl bg-slate-900/30 border border-slate-800/60 text-center">
-              <KeyRound className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-              <p className="text-xs text-slate-400 mb-4">Сначала подключись к ПК, потом отправляй файлы.</p>
+            <div className="p-8 rounded-2xl bg-slate-900/30 border border-slate-800/60 text-center space-y-4 max-w-md mx-auto">
+              <KeyRound className="w-8 h-8 text-slate-600 mx-auto" />
+              <p className="text-xs text-slate-400">Сначала подключись к ПК, потом отправляй файлы.</p>
+              {pendingShareCount > 0 && (
+                <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                  <span>Ожидают отправки: {pendingShareCount} файлов из «Поделиться»</span>
+                  <button
+                    onClick={() => {
+                      clearPendingSharedQueue();
+                      setPendingShareCount(0);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-rose-300 transition shrink-0"
+                  >
+                    Очистить ожидающие ({pendingShareCount})
+                  </button>
+                </div>
+              )}
               <button
                 onClick={() => setShowPairing(true)}
-                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-lg shadow-emerald-600/20"
               >
                 Подключить
               </button>
@@ -277,6 +341,14 @@ export const App: React.FC = () => {
           ))}
         {activeTab === 'host' && <HostPage />}
       </main>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2.5 px-4 py-3 rounded-2xl bg-emerald-600 text-white shadow-2xl shadow-emerald-600/40 text-xs font-semibold">
+          <CheckCircle className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="py-4 text-center text-[11px] text-slate-600 border-t border-slate-900 mt-auto">

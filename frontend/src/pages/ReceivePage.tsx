@@ -9,8 +9,8 @@ export const ReceivePage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmDangerousFile, setConfirmDangerousFile] = useState<FileItem | null>(null);
 
-  const fetchFiles = async () => {
-    setIsLoading(true);
+  const fetchFiles = async (silent = false) => {
+    if (!silent) setIsLoading(true);
     setErrorMessage(null);
     try {
       const items = await apiClient.listFiles();
@@ -18,7 +18,7 @@ export const ReceivePage: React.FC = () => {
     } catch (err: any) {
       setErrorMessage(err.message || 'Не удалось загрузить список файлов');
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -29,23 +29,52 @@ export const ReceivePage: React.FC = () => {
       setIsLoading(false);
     }
 
-    const interval = setInterval(() => {
-      if (apiClient.isAuthenticated()) {
-        fetchFiles();
+    let intervalId: number | null = null;
+
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = window.setInterval(() => {
+        if (apiClient.isAuthenticated() && !document.hidden) {
+          fetchFiles(true);
+        }
+      }, 10000); // Poll for incoming files every 10s
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
       }
-    }, 5000); // Poll for incoming files every 5s
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        if (apiClient.isAuthenticated()) {
+          fetchFiles(true);
+          startPolling();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    startPolling();
 
     const unsubscribe = apiClient.subscribeAuth((authed) => {
       if (authed) {
         fetchFiles();
+        startPolling();
       } else {
+        stopPolling();
         setFiles([]);
         setIsLoading(false);
       }
     });
 
     return () => {
-      clearInterval(interval);
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribe();
     };
   }, []);
@@ -85,7 +114,7 @@ export const ReceivePage: React.FC = () => {
         </div>
 
         <button
-          onClick={fetchFiles}
+          onClick={() => fetchFiles()}
           disabled={isLoading}
           className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition disabled:opacity-50"
           title="Обновить список"

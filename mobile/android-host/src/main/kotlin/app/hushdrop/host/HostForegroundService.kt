@@ -26,6 +26,7 @@ class HostForegroundService : Service() {
 
         const val ACTION_START = "app.hushdrop.host.START"
         const val ACTION_STOP = "app.hushdrop.host.STOP"
+        const val START_STICKY_COMPATIBLE = 0
 
         var activeServer: HushDropServer? = null
             private set
@@ -53,10 +54,25 @@ class HostForegroundService : Service() {
             val intent = Intent(context, HostForegroundService::class.java).apply {
                 action = ACTION_STOP
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            // 1. Clean stop via context.stopService() to avoid ForegroundServiceDidNotStartInTimeException
+            val stopped = try {
+                context.stopService(intent)
+            } catch (e: Exception) {
+                Log.w("HostForegroundService", "stopService failed: ${e.message}")
+                false
+            }
+
+            // 2. If service is still running or needs explicit action delivery, send ACTION_STOP
+            if (!stopped && isRunning) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (e: Exception) {
+                    Log.e("HostForegroundService", "Fallback ACTION_STOP dispatch failed: ${e.message}", e)
+                }
             }
         }
     }
@@ -70,14 +86,43 @@ class HostForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startHostServer()
-            ACTION_STOP -> stopHostServer()
+            ACTION_START -> {
+                startHostServer()
+                return START_STICKY_COMPATIBLE
+            }
+            ACTION_STOP -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        val notification = buildStoppingNotification()
+                        startForeground(NOTIFICATION_ID, notification)
+                    } catch (e: Exception) {
+                        Log.w(tag, "startForeground on ACTION_STOP: ${e.message}")
+                    }
+                }
+                stopHostServer()
+                return START_NOT_STICKY
+            }
+            else -> {
+                if (intent == null && isRunning) {
+                    return START_STICKY_COMPATIBLE
+                }
+            }
         }
         return START_NOT_STICKY
     }
 
     private fun startHostServer() {
-        if (isRunning) return
+        if (isRunning) {
+            // Satisfy startForegroundService contract on repeated calls
+            try {
+                val (pin, _, _) = (activeServer?.pairManager ?: PairManager()).getActivePairingDetails()
+                val notification = buildNotification(hostIp, pin)
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to refresh foreground notification: ${e.message}")
+            }
+            return
+        }
 
         try {
             // 1. Acquire power locks
@@ -135,6 +180,17 @@ class HostForegroundService : Service() {
     }
 
     private fun stopHostServer() {
+        if (!isRunning && activeServer == null && wakeLock == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
+            return
+        }
+
         try {
             nsdHelper?.unregisterService()
             nsdHelper = null
@@ -150,7 +206,12 @@ class HostForegroundService : Service() {
             wifiLock = null
 
             isRunning = false
-            stopForeground(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
             stopSelf()
             Log.i(tag, "HostForegroundService stopped successfully")
         } catch (e: Exception) {
@@ -188,6 +249,15 @@ class HostForegroundService : Service() {
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    private fun buildStoppingNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("HushDrop Host")
+            .setContentText("Остановка хост-сервера...")
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }

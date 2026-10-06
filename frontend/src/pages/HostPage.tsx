@@ -41,6 +41,29 @@ export const HostPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollTimerRef = useRef<number | null>(null);
+  const isRunningRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isRunningRef.current = hostStatus.isRunning;
+  }, [hostStatus.isRunning]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        if (isRunningRef.current) {
+          refreshStatus();
+          startPolling();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     const supported = isNativeHostSupported();
@@ -115,7 +138,7 @@ export const HostPage: React.FC = () => {
 
   const startPolling = () => {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    pollTimerRef.current = window.setInterval(refreshStatus, 4000);
+    pollTimerRef.current = window.setInterval(refreshStatus, 8000);
   };
 
   const stopPolling = () => {
@@ -129,6 +152,7 @@ export const HostPage: React.FC = () => {
     try {
       const status = await getNativeHostStatus();
       setHostStatus(status);
+      isRunningRef.current = status.isRunning;
       if (status.isRunning) {
         if (apiClient.isAuthenticated()) {
           fetchHostedFiles();
