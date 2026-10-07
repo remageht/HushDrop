@@ -487,25 +487,21 @@ if (Test-Path $svcFile) {
     Add-Result '12c' 'stop() without bare startService' 'SKIP' 'service file missing'
 }
 
-# 12d curated android tracking is not enforceable by ignore rules alone
-$curated = @(
-    'mobile/android/app/build.gradle',
-    'mobile/android/app/src/main/AndroidManifest.xml',
-    'mobile/android/app/src/main/java/app/hushdrop/MainActivity.java',
-    'mobile/android/app/src/main/res/xml/network_security_config.xml'
-)
-$trackedCurated = @($tracked | Where-Object { $_ -like 'mobile/android/*' })
-$rootIgnore = Join-Path $RepoRoot '.gitignore'
-$parentExcluded = $false
-if (Test-Path $rootIgnore) {
-    foreach ($line in (Get-Content $rootIgnore)) {
-        if ($line.Trim() -eq 'mobile/android/') { $parentExcluded = $true; break }
-    }
-}
-if ($parentExcluded) {
-    Add-Result '12d' 'android tracking enforceable' 'WARN' "root .gitignore excludes 'mobile/android/' (a directory), so negations in mobile/.gitignore cannot re-include files; the $($trackedCurated.Count) curated file(s) survive only via 'git add -f'"
+# 12d android customizations via patches + script (no force-added files tracked)
+$trackedAndroid = @($tracked | Where-Object { $_ -like 'mobile/android/*' })
+$patchesDir = Join-Path $RepoRoot 'mobile/android-patches'
+$scriptSh = Join-Path $RepoRoot 'mobile/scripts/apply-android-custom.sh'
+$scriptPs1 = Join-Path $RepoRoot 'mobile/scripts/apply-android-custom.ps1'
+
+$hasPatches = (Test-Path $patchesDir) -and (Test-Path (Join-Path $patchesDir 'MainActivity.java')) -and (Test-Path (Join-Path $patchesDir 'network_security_config.xml'))
+$hasScripts = (Test-Path $scriptSh) -and (Test-Path $scriptPs1)
+
+if ($trackedAndroid.Count -gt 0) {
+    Add-Result '12d' 'android customizations scripted' 'FAIL' "$($trackedAndroid.Count) file(s) still tracked under mobile/android/ ($($trackedAndroid -join ', '))"
+} elseif (-not $hasPatches -or -not $hasScripts) {
+    Add-Result '12d' 'android customizations scripted' 'FAIL' "missing patches or apply scripts in mobile/"
 } else {
-    Add-Result '12d' 'android tracking enforceable' 'PASS' "$($trackedCurated.Count) curated file(s) tracked"
+    Add-Result '12d' 'android customizations scripted' 'PASS' "0 files tracked in mobile/android/, patches and apply scripts present"
 }
 
 # ----------------------------------------------------------------- summary ---

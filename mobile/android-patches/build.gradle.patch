@@ -1,0 +1,71 @@
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -1,7 +1,28 @@
+ apply plugin: 'com.android.application'
+ 
++def getAppVersionName() {
++    def pkg = file('../../package.json')
++    if (pkg.exists()) {
++        def json = new groovy.json.JsonSlurper().parseText(pkg.text)
++        return json.version ?: "0.3.4"
++    }
++    return "0.3.4"
++}
++
++def getAppVersionCode() {
++    def pkg = file('../../package.json')
++    if (pkg.exists()) {
++        def json = new groovy.json.JsonSlurper().parseText(pkg.text)
++        if (json.versionCode) return json.versionCode.toInteger()
++        def v = json.version ?: "0.3.4"
++        def parts = v.tokenize('.')
++        if (parts.size() >= 3) {
++            try {
++                return parts[0].toInteger() * 1000 + parts[1].toInteger() * 10 + parts[2].toInteger()
++            } catch (Exception ignored) {}
++        }
++    }
++    return 34
++}
++
+ android {
+     namespace "app.hushdrop"
+     compileSdk rootProject.ext.compileSdkVersion
+     defaultConfig {
+         applicationId "app.hushdrop"
+         minSdkVersion rootProject.ext.minSdkVersion
+         targetSdkVersion rootProject.ext.targetSdkVersion
+-        versionCode 1
+-        versionName "1.0"
++        versionCode getAppVersionCode()
++        versionName getAppVersionName()
+         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+         aaptOptions {
+             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+         }
+     }
+     buildTypes {
+         release {
+             minifyEnabled false
+             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+         }
+     }
++    packaging {
++        resources {
++            excludes += [
++                'META-INF/versions/9/OSGI-INF/MANIFEST.MF',
++                'META-INF/versions/9/OSGI-INF/*',
++                'META-INF/INDEX.LIST',
++                'META-INF/io.netty.versions.properties'
++            ]
++            pickFirsts += [
++                'META-INF/**'
++            ]
++        }
++    }
+ }
+ 
+ dependencies {
+     implementation project(':capacitor-cordova-android-plugins')
++    implementation project(':android-host')
+ }

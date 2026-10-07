@@ -13,82 +13,29 @@ Standalone Capacitor container for the HushDrop React PWA. Delivers zero-cloud, 
 
 ---
 
-## 2. AndroidManifest.xml Configuration Fragment
+## 2. Android native: generated, правишь patches + скрипт, не файлы
 
-When `npx cap add android` or `npx cap sync` is executed, the following configuration is applied to `mobile/android/app/src/main/AndroidManifest.xml`:
+Директория `mobile/android/` является полностью генерируемым артефактом Capacitor (`cap add` / `cap sync`) и **полностью исключена из Git-трекинга**.
 
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="app.hushdrop">
+Никакие файлы в `mobile/android/` **не редактируются вручную** и не добавляются через `git add -f`. Все кастомизации платформы хранятся в виде эталонов и фрагментов в папке `mobile/android-patches/`:
+- `android-patches/network_security_config.xml` — конфигурация безопасности TLS / localhost loopback
+- `android-patches/MainActivity.java` — эталонный класс с интеграцией `HushDropHostPlugin` и обработкой `onNewIntent`
+- `android-patches/manifest-snippet.xml` — фрагмент манифеста (deep-links, SEND/SEND_MULTIPLE share targets, изоляция сервиса `HostForegroundService`, FileProvider)
+- `android-patches/build.gradle.patch` — фрагмент конфигурации Gradle с вычислением `versionName` и `versionCode` из `package.json`
 
-    <!-- Network Permissions (LAN P2P) -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-
-    <!-- Storage Permissions for Sharing Files -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-
-    <application
-        android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
-        android:label="HushDrop"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true"> <!-- Cleartext allowed solely for local :8080/cert download -->
-
-        <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-            android:name=".MainActivity"
-            android:label="HushDrop"
-            android:theme="@style/AppTheme.NoActionBarLaunch"
-            android:launchMode="singleTask"
-            android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- Custom Scheme Deep Linking: hushdrop://pair?host=...&token=...&fp=... -->
-            <intent-filter android:autoVerify="false">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="hushdrop" android:host="pair" />
-            </intent-filter>
-
-            <!-- Standard HTTPS Deep Linking from QR Code: https://<lan-ip>:8443/?token=... -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:port="8443" />
-            </intent-filter>
-
-            <!-- System Share Target (Single File): Send to HushDrop -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="*/*" />
-            </intent-filter>
-
-            <!-- System Share Target (Multiple Files): Send to HushDrop -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND_MULTIPLE" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="*/*" />
-            </intent-filter>
-
-        </activity>
-    </application>
-</manifest>
+Кастомизации накладываются автоматически при каждом вызове:
+```bash
+npm run cap:sync
 ```
+или через скрипты напрямую:
+```bash
+# Linux / macOS:
+./scripts/apply-android-custom.sh
+
+# Windows PowerShell:
+.\scripts\apply-android-custom.ps1
+```
+Скрипт полностью идемпотентен: повторные запуски не вызывают повторных правок или дублирования строк.
 
 ---
 
@@ -110,8 +57,9 @@ cd ../mobile
 ### Step 3: Add & Sync Android Project
 ```bash
 npx cap add android
-npx cap sync android
+npm run cap:sync
 ```
+*(Скрипт `apply-android-custom` выполнится автоматически после синхронизации).*
 
 ### Step 4: Assemble Debug APK
 ```bash

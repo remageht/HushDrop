@@ -6,10 +6,11 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "cap:sync": "cap sync android",
-    "cap:add:android": "cap add android",
+    "apply:custom": "node scripts/apply-android-custom.js",
+    "cap:sync": "cap sync android && node scripts/apply-android-custom.js",
+    "cap:add:android": "cap add android && node scripts/apply-android-custom.js",
     "cap:open": "cap open android",
-    "cap:build": "npm run build && cap sync android",
+    "cap:build": "npm run build && npm run cap:sync",
     "android:build": "cd android && gradlew.bat assembleDebug && cd .."
   },
   "dependencies": {

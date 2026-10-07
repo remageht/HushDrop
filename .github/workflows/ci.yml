@@ -96,3 +96,53 @@ jobs:
           npm ci
           cd src-tauri
           cargo check
+
+  android-custom-idempotence:
+    name: Verify Android Customization Script Idempotence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'mobile/package-lock.json'
+
+      - name: Install Mobile Dependencies
+        run: |
+          cd mobile
+          npm ci
+
+      - name: Add Android Platform via Capacitor
+        run: |
+          cd mobile
+          npx cap add android
+
+      - name: First Run of Customization Script
+        run: |
+          chmod +x mobile/scripts/apply-android-custom.sh
+          ./mobile/scripts/apply-android-custom.sh
+
+      - name: Snapshot Modified Files
+        run: |
+          sha256sum mobile/android/app/src/main/AndroidManifest.xml > /tmp/manifest.sha
+          sha256sum mobile/android/app/build.gradle > /tmp/gradle.sha
+          sha256sum mobile/android/settings.gradle > /tmp/settings.sha
+          sha256sum mobile/android/app/src/main/java/app/hushdrop/MainActivity.java > /tmp/activity.sha
+          sha256sum mobile/android/app/src/main/res/xml/network_security_config.xml > /tmp/netsec.sha
+
+      - name: Second Run of Customization Script (Idempotency Check)
+        run: |
+          ./mobile/scripts/apply-android-custom.sh
+
+      - name: Verify All File Hashes Remain Identical
+        run: |
+          sha256sum -c /tmp/manifest.sha
+          sha256sum -c /tmp/gradle.sha
+          sha256sum -c /tmp/settings.sha
+          sha256sum -c /tmp/activity.sha
+          sha256sum -c /tmp/netsec.sha
+
