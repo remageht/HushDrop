@@ -1,6 +1,6 @@
 {
   "name": "hushdrop-mobile",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "HushDrop mobile Capacitor wrapper for Android sideload",
   "private": true,
   "main": "dist/index.js",

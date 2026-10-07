@@ -6,7 +6,7 @@
 
 Private phone ↔ PC file transfer over the local network (Wi-Fi) — no internet, no messengers, no third-party servers, no cloud storage. Phone ↔ phone works via the shared hub on the PC: one uploads via "Send", the other picks up via "Receive".
 
-[![Release](https://img.shields.io/badge/release-v0.3.3-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.4-emerald?style=flat)](https://github.com/remageht/HushDrop/releases)
 [![Status](https://img.shields.io/badge/status-alpha-orange?style=flat)](#security-disclaimer)
 [![Go Version](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go)](https://go.dev)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://react.dev)
@@ -14,7 +14,7 @@ Private phone ↔ PC file transfer over the local network (Wi-Fi) — no interne
 
 > [!WARNING]
 > ### Security disclaimer (Alpha)
-> The project is in active alpha (`v0.3.3`). Intended strictly for local networks (home Wi-Fi, office LAN, mobile hotspot). Do not expose the service port to the public internet without a VPN. Always verify the TLS fingerprint before uploading files.
+> The project is in active alpha (`v0.3.4`). Intended strictly for local networks (home Wi-Fi, office LAN, mobile hotspot). Do not expose the service port to the public internet without a VPN. Always verify the TLS fingerprint before uploading files.
 
 ---
 

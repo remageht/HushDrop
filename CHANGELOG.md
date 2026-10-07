@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-10-06
+
+### Fixed
+- **Rate Limit Exhuastion**: Increased metered API budget to 60 req/min and reduced background polling frequency (8s for Host, 10s for Receive) with `visibilitychange` suspension to prevent 429 errors when multiple tabs are open.
+- **Android Background Stop Path**: Corrected `HostForegroundService` shutdown sequence on Android 8+ by starting foreground with a stopping notification inside the catch block before `stopSelf()`, averting `ForegroundServiceDidNotStartInTimeException`.
+- **System Share Queue Deduplication**: Removed redundant UI share event emission to prevent duplicate chunk uploads, and automatically flush the pending share queue into active transfers upon successful pairing.
+
+### Changed
+- Bumped unified project version to `0.3.4` (Android `versionCode 34`).
+
+---
+
 ## [0.3.3] - 2026-10-05
 
 ### Added

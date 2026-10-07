@@ -4,9 +4,9 @@ def getAppVersionName() {
     def pkg = file('../../package.json')
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
-        return json.version ?: "0.3.3"
+        return json.version ?: "0.3.4"
     }
-    return "0.3.3"
+    return "0.3.4"
 }
 
 android {
@@ -16,7 +16,7 @@ android {
         applicationId "app.hushdrop"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 33
+        versionCode 34
         versionName getAppVersionName()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
