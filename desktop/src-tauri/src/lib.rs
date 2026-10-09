@@ -475,7 +475,11 @@ pub fn run() {
                     std::thread::sleep(Duration::from_millis(1600) - elapsed);
                 }
 
+                // The window may have loaded before the Go server was ready
+                // (blank error page) — force a fresh navigation now that /health is OK.
                 if let Some(window) = handle_clone.get_webview_window("main") {
+                    let _ = window.eval("window.location.reload()");
+                    std::thread::sleep(Duration::from_millis(900));
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
