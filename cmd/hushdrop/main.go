@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -20,7 +24,35 @@ import (
 
 var version = "0.3.4"
 
+// openBrowserDefault is overridden per build via ldflags:
+// console build -> "false", GUI (windowsgui) build -> "true".
+// Tauri sidecar always passes --open-browser=false explicitly.
+var openBrowserDefault = "false"
+
+// writePairingFile saves the current pairing details next to the data dir
+// so GUI-subsystem builds (no console window) still expose PIN/fingerprint.
+func writePairingFile(dataDir, url, pin, fingerprint string) {
+	content := fmt.Sprintf("HushDrop pairing (valid ~10 min from %s)\nURL: %s\nPIN: %s\nTLS fingerprint (SHA256): %s\n",
+		time.Now().Format("2006-01-02 15:04:05"), url, pin, fingerprint)
+	_ = os.WriteFile(filepath.Join(dataDir, "pairing.txt"), []byte(content), 0600)
+}
+
+// openBrowser tries to open the URL in the default browser (best effort, no CGO).
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
+}
+
 func main() {
+	openBrowserFlag := flag.Bool("open-browser", openBrowserDefault == "true", "Open the local PWA in the default browser on startup and write data/pairing.txt")
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Ошибка конфигурации: %v", err)
@@ -78,6 +110,11 @@ func main() {
 	fmt.Println("Отсканируйте QR-код телефоном в той же сети Wi-Fi:")
 	discovery.PrintTerminalQR(primaryURL)
 	fmt.Println("=================================================================")
+
+	if *openBrowserFlag {
+		writePairingFile(cfg.DataDir, primaryURL, pin, tlsInfo.Fingerprint)
+		openBrowser(fmt.Sprintf("https://127.0.0.1:%s/", portStr))
+	}
 
 	// Create and start server
 	srv := server.NewServer(cfg, tlsInfo, pairManager, transferManager)

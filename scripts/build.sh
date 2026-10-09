@@ -20,7 +20,7 @@ mkdir -p "$DIST_DIR"
 
 export CGO_ENABLED=0
 VERSION="0.3.4"
-LDFLAGS="-s -w -X main.version=${VERSION}"
+LDFLAGS="-s -w -X main.version=${VERSION} -X main.openBrowserDefault=false"
 
 # Linux amd64
 echo "   -> Сборка dist/hushdrop-linux-amd64..."
@@ -30,7 +30,7 @@ GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "$DIST_DIR/hushdrop-li
 echo "   -> Сборка dist/HushDrop-console.exe (console)..."
 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o "$DIST_DIR/HushDrop-console.exe" ./cmd/hushdrop
 echo "   -> Сборка dist/HushDrop.exe (GUI)..."
-GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS} -H=windowsgui" -o "$DIST_DIR/HushDrop.exe" ./cmd/hushdrop
+GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS} -X main.openBrowserDefault=true -H=windowsgui" -o "$DIST_DIR/HushDrop.exe" ./cmd/hushdrop
 
 # macOS arm64
 echo "   -> Сборка dist/hushdrop-darwin-arm64..."

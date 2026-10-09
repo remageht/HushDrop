@@ -23,7 +23,7 @@ if (!(Test-Path $distDir)) {
 
 $env:CGO_ENABLED = "0"
 $version = "0.3.4"
-$ldflags = "-s -w -X main.version=$version"
+$ldflags = "-s -w -X main.version=$version -X main.openBrowserDefault=false"
 
 # Windows amd64 (console + GUI builds from the same code)
 Write-Host "   -> Building dist/HushDrop-console.exe (Windows amd64, console)..." -ForegroundColor Yellow
@@ -33,7 +33,7 @@ go build -ldflags $ldflags -o "$distDir\HushDrop-console.exe" .\cmd\hushdrop
 Copy-Item "$distDir\HushDrop-console.exe" "$rootDir\HushDrop-console.exe" -Force
 
 Write-Host "   -> Building dist/HushDrop.exe (Windows amd64, GUI)..." -ForegroundColor Yellow
-$ldflagsNoConsole = $ldflags + " -H=windowsgui"
+$ldflagsNoConsole = "-s -w -X main.version=$version -X main.openBrowserDefault=true -H=windowsgui"
 go build -ldflags $ldflagsNoConsole -o "$distDir\HushDrop.exe" .\cmd\hushdrop
 Copy-Item "$distDir\HushDrop.exe" "$rootDir\HushDrop.exe" -Force
 

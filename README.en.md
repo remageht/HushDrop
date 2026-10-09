@@ -30,7 +30,7 @@ Private phone ↔ PC file transfer over the local network (Wi-Fi) — no interne
 4. In the opened PWA, enter the 6-digit PIN and verify the TLS fingerprint.
 5. Done! Drag and drop files into the browser window to transfer them.
 
-> **Windows files:** `HushDrop-Desktop.exe` — GUI; `HushDrop.exe` — silent server with no window (for sidecar/autostart, QR not visible); `HushDrop-console.exe` — with console and QR in the terminal.
+> **Windows files:** `HushDrop-Desktop.exe` — GUI; `HushDrop.exe` — double-click: opens the PWA in the browser and writes PIN/QR link to `data/pairing.txt` (no console); `HushDrop-console.exe` — with console and QR in the terminal.
 
 > **100% portable**: in `--portable` mode all certificates, temp chunks and downloaded files stay strictly in `./data` next to the binary. Nothing is written to the Windows registry or `%APPDATA%`. Runs straight from a USB stick without admin rights.
 

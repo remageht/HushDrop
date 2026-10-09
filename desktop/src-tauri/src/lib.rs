@@ -75,6 +75,7 @@ fn start_go_backend(
 
     let mut child = std::process::Command::new(&binary_path)
         .arg("--portable")
+        .arg("--open-browser=false")
         .current_dir(&work_dir)
         .stdout(Stdio::piped())
         .spawn()
