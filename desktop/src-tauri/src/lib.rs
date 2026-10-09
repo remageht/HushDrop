@@ -47,7 +47,6 @@ fn locate_go_binary() -> Option<PathBuf> {
     candidates.push(PathBuf::from("dist/HushDrop.exe"));
     candidates.push(PathBuf::from("../dist/HushDrop.exe"));
     candidates.push(PathBuf::from("../../dist/HushDrop.exe"));
-    candidates.push(PathBuf::from("C:/dev/hushdrop/dist/HushDrop.exe"));
 
     for candidate in candidates {
         if candidate.exists() && candidate.is_file() {
