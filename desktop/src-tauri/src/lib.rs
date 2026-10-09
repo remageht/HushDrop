@@ -5,12 +5,20 @@ use std::time::Duration;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent, Emitter, Listener};
+
+#[derive(Default, Clone)]
+struct PairingInfo {
+    pin: String,
+    fp: String,
+    url: String,
+}
 
 struct AppState {
     go_child: Arc<Mutex<Option<Child>>>,
     server_base_url: String,
     http_client: reqwest::blocking::Client,
+    pairing_info: Arc<Mutex<PairingInfo>>,
 }
 
 /// Finds the HushDrop Go binary across common paths.
@@ -20,12 +28,21 @@ fn locate_go_binary() -> Option<PathBuf> {
     // 1. Next to current executable
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(parent) = current_exe.parent() {
+            #[cfg(target_os = "windows")]
+            candidates.push(parent.join("HushDrop-noconsole.exe"));
             candidates.push(parent.join("HushDrop.exe"));
             candidates.push(parent.join("HushDrop"));
         }
     }
 
     // 2. Cwd and relative dist
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(PathBuf::from("HushDrop-noconsole.exe"));
+        candidates.push(PathBuf::from("dist/HushDrop-noconsole.exe"));
+        candidates.push(PathBuf::from("../dist/HushDrop-noconsole.exe"));
+        candidates.push(PathBuf::from("../../dist/HushDrop-noconsole.exe"));
+    }
     candidates.push(PathBuf::from("HushDrop.exe"));
     candidates.push(PathBuf::from("dist/HushDrop.exe"));
     candidates.push(PathBuf::from("../dist/HushDrop.exe"));
@@ -40,8 +57,15 @@ fn locate_go_binary() -> Option<PathBuf> {
     None
 }
 
+use std::process::Stdio;
+use std::io::{BufRead, BufReader};
+
 /// Spawns the Go binary in --portable mode.
-fn start_go_backend(child_holder: Arc<Mutex<Option<Child>>>) -> Result<(), String> {
+fn start_go_backend(
+    child_holder: Arc<Mutex<Option<Child>>>,
+    app: AppHandle,
+    pairing_info: Arc<Mutex<PairingInfo>>,
+) -> Result<(), String> {
     let binary_path = locate_go_binary()
         .ok_or_else(|| "Не удалось найти исполняемый файл HushDrop.exe".to_string())?;
 
@@ -50,11 +74,54 @@ fn start_go_backend(child_holder: Arc<Mutex<Option<Child>>>) -> Result<(), Strin
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let child = std::process::Command::new(&binary_path)
+    let mut child = std::process::Command::new(&binary_path)
         .arg("--portable")
         .current_dir(&work_dir)
+        .stdout(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Ошибка запуска {}: {}", binary_path.display(), e))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            let mut pin = String::new();
+            let mut fp = String::new();
+            let mut url = String::new();
+            let mut ready = false;
+
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    println!("{}", l);
+                    if l.contains("PIN для сопряжения:") {
+                        if let Some(p) = l.split(':').nth(1) {
+                            pin = p.split('(').next().unwrap_or("").trim().to_string();
+                        }
+                    }
+                    if l.contains("TLS 1.3 Fingerprint") {
+                        if let Some(f) = l.split("):").nth(1) {
+                            fp = f.trim().to_string();
+                        }
+                    }
+                    if l.contains("Адрес подключения:") {
+                        if let Some(u) = l.split("Адрес подключения:").nth(1) {
+                            url = u.trim().to_string();
+                        }
+                    }
+                    if l.contains("=================================================================") && !pin.is_empty() && !ready {
+                        ready = true;
+                        {
+                            let mut info = pairing_info.lock().unwrap();
+                            info.pin = pin.clone();
+                            info.fp = fp.clone();
+                            info.url = url.clone();
+                        }
+                        // Open QR window on first start
+                        let _ = app.emit("open_qr_event", ());
+                    }
+                }
+            }
+        });
+    }
 
     let mut lock = child_holder.lock().unwrap();
     *lock = Some(child);
@@ -116,27 +183,16 @@ fn revoke_sessions(client: &reqwest::blocking::Client, server_url: &str) {
 }
 
 /// Displays the pairing QR and PIN window.
-fn open_qr_window(app: &AppHandle, client: &reqwest::blocking::Client, server_url: &str) {
+fn open_qr_window(app: &AppHandle, pairing_info: &Arc<Mutex<PairingInfo>>) {
     if let Some(window) = app.get_webview_window("qr_window") {
         let _ = window.show();
         let _ = window.set_focus();
         return;
     }
 
-    // Query /api/pair/info
-    let info_url = format!("{}/api/pair/info", server_url);
-    let (fingerprint, token) = match client.get(&info_url).send() {
-        Ok(resp) => {
-            if let Ok(json) = resp.json::<serde_json::Value>() {
-                (
-                    json["fingerprint"].as_str().unwrap_or("").to_string(),
-                    json["token"].as_str().unwrap_or("").to_string(),
-                )
-            } else {
-                ("".to_string(), "".to_string())
-            }
-        }
-        Err(_) => ("".to_string(), "".to_string()),
+    let (pin, fp, url) = {
+        let info = pairing_info.lock().unwrap();
+        (info.pin.clone(), info.fp.clone(), info.url.clone())
     };
 
     let html = format!(
@@ -180,9 +236,10 @@ fn open_qr_window(app: &AppHandle, client: &reqwest::blocking::Client, server_ur
       margin-bottom: 16px;
     }}
     .pin-label {{ font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 6px; }}
-    .pin-value {{ font-family: monospace; font-size: 24px; color: #10b981; letter-spacing: 0.25em; }}
+    .pin-value {{ font-family: monospace; font-size: 24px; color: #10b981; letter-spacing: 0.25em; margin-bottom: 16px; }}
     .fp-label {{ font-size: 11px; color: #64748b; margin-top: 10px; margin-bottom: 4px; }}
-    .fp-value {{ font-family: monospace; font-size: 10px; color: #94a3b8; word-break: break-all; background: #090d16; padding: 8px; border-radius: 8px; border: 1px solid #1e293b; }}
+    .fp-value {{ font-family: monospace; font-size: 10px; color: #94a3b8; word-break: break-all; background: #090d16; padding: 8px; border-radius: 8px; border: 1px solid #1e293b; cursor: pointer; }}
+    .fp-value:hover {{ border-color: #38bdf8; }}
     .btn {{
       background: #10b981;
       color: #fff;
@@ -197,22 +254,53 @@ fn open_qr_window(app: &AppHandle, client: &reqwest::blocking::Client, server_ur
       margin-top: 10px;
     }}
     .btn:hover {{ background: #059669; }}
+    .copy-btn {{
+      background: #3b82f6;
+      margin-left: 8px;
+    }}
+    .copy-btn:hover {{ background: #2563eb; }}
+    #toast {{
+      visibility: hidden; min-width: 200px; background-color: #333; color: #fff; 
+      text-align: center; border-radius: 8px; padding: 12px; position: fixed; 
+      z-index: 1; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 13px;
+    }}
+    #toast.show {{
+      visibility: visible; -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s; animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    }}
+    @-webkit-keyframes fadein {{ from {{bottom: 0; opacity: 0;}} to {{bottom: 30px; opacity: 1;}} }}
+    @keyframes fadein {{ from {{bottom: 0; opacity: 0;}} to {{bottom: 30px; opacity: 1;}} }}
+    @-webkit-keyframes fadeout {{ from {{bottom: 30px; opacity: 1;}} to {{bottom: 0; opacity: 0;}} }}
+    @keyframes fadeout {{ from {{bottom: 30px; opacity: 1;}} to {{bottom: 0; opacity: 0;}} }}
   </style>
 </head>
 <body>
   <div class="badge">LAN ONLY</div>
   <h1>Сопряжение с мобильным устройством</h1>
-  <p class="sub">Отсканируйте камерой или введите параметры в приложении</p>
+  <p class="sub">Введите PIN или скопируйте ссылку</p>
   <div class="card">
-    <div class="pin-label">Отпечаток TLS 1.3 (SHA-256)</div>
-    <div class="fp-value">{}</div>
-    <div class="fp-label">Одноразовый токен:</div>
-    <div class="fp-value">{}</div>
+    <div class="pin-label">PIN для сопряжения</div>
+    <div class="pin-value">{}</div>
+    <div class="fp-label" title="Нажмите чтобы скопировать">Отпечаток TLS 1.3 (SHA-256)</div>
+    <div class="fp-value" onclick="copyText('{}')">{}</div>
   </div>
-  <a class="btn" href="http://127.0.0.1:8080/cert" target="_blank">Скачать сертификат (:8080/cert)</a>
+  <div>
+      <a class="btn" href="http://127.0.0.1:8080/cert" target="_blank">Сертификат</a>
+      <button class="btn copy-btn" onclick="copyText('{}')">Копировать ссылку</button>
+  </div>
+  <div id="toast">Скопировано в буфер обмена</div>
+
+  <script>
+    function copyText(text) {{
+        navigator.clipboard.writeText(text).then(function() {{
+            var x = document.getElementById("toast");
+            x.className = "show";
+            setTimeout(function(){{ x.className = x.className.replace("show", ""); }}, 3000);
+        }});
+    }}
+  </script>
 </body>
 </html>"#,
-        fingerprint, token
+        pin, fp, fp, url
     );
 
     let encoded = utf8_percent_encode(&html, NON_ALPHANUMERIC).to_string();
@@ -241,6 +329,7 @@ pub fn run() {
     );
 
     let go_child_holder = Arc::new(Mutex::new(None));
+    let pairing_info = Arc::new(Mutex::new(PairingInfo::default()));
     let server_url = "https://127.0.0.1:8443".to_string();
 
     // Configure resilient HTTP client for loopback self-signed cert
@@ -250,13 +339,11 @@ pub fn run() {
         .build()
         .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
-    // 2. Start Go backend
-    let _ = start_go_backend(go_child_holder.clone());
-
     let state = AppState {
         go_child: go_child_holder.clone(),
         server_base_url: server_url.clone(),
         http_client: http_client.clone(),
+        pairing_info: pairing_info.clone(),
     };
 
     let go_child_exit = go_child_holder.clone();
@@ -265,6 +352,9 @@ pub fn run() {
         .manage(state)
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // 2. Start Go backend
+            let _ = start_go_backend(go_child_holder.clone(), app_handle.clone(), pairing_info.clone());
 
             // Setup system tray menu
             let show_hide = MenuItem::with_id(app, "toggle_visible", "Показать/Скрыть", true, None::<&str>)?;
@@ -305,7 +395,7 @@ pub fn run() {
                             }
                         }
                         "open_qr" => {
-                            open_qr_window(app, &state.http_client, &state.server_base_url);
+                            open_qr_window(app, &state.pairing_info);
                         }
                         "open_downloads" => {
                             open_downloads_folder();
@@ -339,6 +429,12 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            
+            let handle_clone = app_handle.clone();
+            app.listen("open_qr_event", move |_| {
+                let state = handle_clone.state::<AppState>();
+                open_qr_window(&handle_clone, &state.pairing_info);
+            });
 
             // Open splashscreen window (400x400) with animated SVG logo
             let splash_html = include_str!("../../../frontend/public/splashscreen.html");

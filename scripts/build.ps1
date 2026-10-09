@@ -32,6 +32,11 @@ $env:GOARCH = "amd64"
 go build -ldflags $ldflags -o "$distDir\HushDrop.exe" .\cmd\hushdrop
 Copy-Item "$distDir\HushDrop.exe" "$rootDir\HushDrop.exe" -Force
 
+Write-Host "   -> Building dist/HushDrop-noconsole.exe (Windows amd64)..." -ForegroundColor Yellow
+$ldflagsNoConsole = $ldflags + " -H=windowsgui"
+go build -ldflags $ldflagsNoConsole -o "$distDir\HushDrop-noconsole.exe" .\cmd\hushdrop
+Copy-Item "$distDir\HushDrop-noconsole.exe" "$rootDir\HushDrop-noconsole.exe" -Force
+
 # Linux amd64
 Write-Host "   -> Building dist/hushdrop-linux-amd64 (Linux amd64)..." -ForegroundColor Yellow
 $env:GOOS = "linux"
