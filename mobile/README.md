@@ -79,7 +79,7 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 ## 4. Connection & Pairing Flow
 
-1. **Launch Host**: Run `HushDrop.exe --portable` on PC.
+1. **Launch Host**: Run `HushDrop-console.exe --portable` on PC.
 2. **Scan / Open**:
    - Tap link from QR code or open `app.hushdrop`.
    - Optional: download and install cert via `http://<lan-ip>:8080/cert`.

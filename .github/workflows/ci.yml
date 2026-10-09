@@ -88,7 +88,8 @@ jobs:
           mkdir -p internal/server/web
           cp -r frontend/dist/* internal/server/web/
           mkdir -p dist
-          go build -ldflags="-s -w" -o dist/HushDrop.exe ./cmd/hushdrop
+          go build -ldflags="-s -w" -o dist/HushDrop-console.exe ./cmd/hushdrop
+          go build -ldflags="-s -w -H=windowsgui" -o dist/HushDrop.exe ./cmd/hushdrop
 
       - name: Check Desktop Tauri Compilation
         run: |

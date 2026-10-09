@@ -25,12 +25,12 @@ struct AppState {
 fn locate_go_binary() -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
-    // 1. Next to current executable
+    // 1. Next to current executable (GUI build first, console fallback)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(parent) = current_exe.parent() {
             #[cfg(target_os = "windows")]
-            candidates.push(parent.join("HushDrop-noconsole.exe"));
             candidates.push(parent.join("HushDrop.exe"));
+            candidates.push(parent.join("HushDrop-console.exe"));
             candidates.push(parent.join("HushDrop"));
         }
     }
@@ -38,15 +38,15 @@ fn locate_go_binary() -> Option<PathBuf> {
     // 2. Cwd and relative dist
     #[cfg(target_os = "windows")]
     {
-        candidates.push(PathBuf::from("HushDrop-noconsole.exe"));
-        candidates.push(PathBuf::from("dist/HushDrop-noconsole.exe"));
-        candidates.push(PathBuf::from("../dist/HushDrop-noconsole.exe"));
-        candidates.push(PathBuf::from("../../dist/HushDrop-noconsole.exe"));
+        candidates.push(PathBuf::from("HushDrop.exe"));
+        candidates.push(PathBuf::from("dist/HushDrop.exe"));
+        candidates.push(PathBuf::from("../dist/HushDrop.exe"));
+        candidates.push(PathBuf::from("../../dist/HushDrop.exe"));
     }
-    candidates.push(PathBuf::from("HushDrop.exe"));
-    candidates.push(PathBuf::from("dist/HushDrop.exe"));
-    candidates.push(PathBuf::from("../dist/HushDrop.exe"));
-    candidates.push(PathBuf::from("../../dist/HushDrop.exe"));
+    candidates.push(PathBuf::from("HushDrop-console.exe"));
+    candidates.push(PathBuf::from("dist/HushDrop-console.exe"));
+    candidates.push(PathBuf::from("../dist/HushDrop-console.exe"));
+    candidates.push(PathBuf::from("../../dist/HushDrop-console.exe"));
 
     for candidate in candidates {
         if candidate.exists() && candidate.is_file() {

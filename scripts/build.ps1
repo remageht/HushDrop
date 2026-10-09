@@ -25,17 +25,17 @@ $env:CGO_ENABLED = "0"
 $version = "0.3.4"
 $ldflags = "-s -w -X main.version=$version"
 
-# Windows amd64
-Write-Host "   -> Building dist/HushDrop.exe (Windows amd64)..." -ForegroundColor Yellow
+# Windows amd64 (console + GUI builds from the same code)
+Write-Host "   -> Building dist/HushDrop-console.exe (Windows amd64, console)..." -ForegroundColor Yellow
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
-go build -ldflags $ldflags -o "$distDir\HushDrop.exe" .\cmd\hushdrop
-Copy-Item "$distDir\HushDrop.exe" "$rootDir\HushDrop.exe" -Force
+go build -ldflags $ldflags -o "$distDir\HushDrop-console.exe" .\cmd\hushdrop
+Copy-Item "$distDir\HushDrop-console.exe" "$rootDir\HushDrop-console.exe" -Force
 
-Write-Host "   -> Building dist/HushDrop-noconsole.exe (Windows amd64)..." -ForegroundColor Yellow
+Write-Host "   -> Building dist/HushDrop.exe (Windows amd64, GUI)..." -ForegroundColor Yellow
 $ldflagsNoConsole = $ldflags + " -H=windowsgui"
-go build -ldflags $ldflagsNoConsole -o "$distDir\HushDrop-noconsole.exe" .\cmd\hushdrop
-Copy-Item "$distDir\HushDrop-noconsole.exe" "$rootDir\HushDrop-noconsole.exe" -Force
+go build -ldflags $ldflagsNoConsole -o "$distDir\HushDrop.exe" .\cmd\hushdrop
+Copy-Item "$distDir\HushDrop.exe" "$rootDir\HushDrop.exe" -Force
 
 # Linux amd64
 Write-Host "   -> Building dist/hushdrop-linux-amd64 (Linux amd64)..." -ForegroundColor Yellow

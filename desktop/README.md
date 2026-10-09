@@ -7,8 +7,8 @@
 ## 1. Архитектура и Zero-Install Portable Mode
 
 - **Sidecar архитектура**: При запуске `HushDrop-Desktop.exe` автоматически стартует Go-бэкенд с флагом `--portable`.
-- **Без консоли**: sidecar — это `HushDrop-noconsole.exe` (собран с `-H=windowsgui`, консольного окна нет). PIN и fingerprint из его stdout парсятся оболочкой и показываются в автооткрывающемся QR-окне при первом старте + тосты и кнопка копирования ссылки.
-- **Какой exe запускать**: `HushDrop-Desktop.exe` — для GUI (окно + трей, без консоли); `HushDrop.exe` — напрямую руками, с консолью и QR в терминале (удобно с USB-флешки).
+- **Без консоли**: sidecar — это `HushDrop.exe` (собран с `-H=windowsgui`, консольного окна нет). PIN и fingerprint из его stdout парсятся оболочкой и показываются в автооткрывающемся QR-окне при первом старте + тосты и кнопка копирования ссылки.
+- **Какой exe запускать**: `HushDrop-Desktop.exe` — для GUI (окно + трей, без консоли); `HushDrop.exe` — тихий сервер без окна (для sidecar и автозапуска); `HushDrop-console.exe` — напрямую руками, с консолью и QR в терминале (удобно с USB-флешки, там виден PIN).
 - **Изоляция данных**: Все ключи, временные чанки и скачанные файлы размещаются строго в `./data/` рядом с бинарником. В Windows Registry или `%APPDATA%` ничего не пишется.
 - **Безопасность процессов**: При закрытии приложения через системный трей («Выход») посылается `POST /api/revoke` (сброс сессий и zeroize ключей из памяти), а дочерний Go-процесс штатно завершается (`SIGKILL`/`kill()`).
 - **WebView2 TLS Loopback**: Для локального адреса `https://127.0.0.1:8443` включен флаг `--ignore-certificate-errors`, исключающий предупреждения браузера при первом старте.
@@ -38,8 +38,9 @@ cd frontend
 npm ci && npm run build
 cd ..
 
-# 2. Сборка Go бинарника
-go build -ldflags="-s -w" -o dist/HushDrop.exe ./cmd/hushdrop
+# 2. Сборка Go бинарников (консольный + оконный)
+go build -ldflags="-s -w" -o dist/HushDrop-console.exe ./cmd/hushdrop
+go build -ldflags="-s -w -H=windowsgui" -o dist/HushDrop.exe ./cmd/hushdrop
 
 # 3. Сборка настольного приложения через Tauri 2
 cd desktop

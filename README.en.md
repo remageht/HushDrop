@@ -21,14 +21,16 @@ Private phone ↔ PC file transfer over the local network (Wi-Fi) — no interne
 ## ⚡ Quick start
 
 ### Windows (portable)
-1. Download `HushDrop.exe` (or `HushDrop-Desktop.exe` with tray) from [Releases](https://github.com/remageht/HushDrop/releases).
-2. Run by double-click or from the terminal:
+1. Download `HushDrop-Desktop.exe` (window + tray) or `HushDrop-console.exe` (console) from [Releases](https://github.com/remageht/HushDrop/releases).
+2. For console mode, run from the terminal:
    ```cmd
-   HushDrop.exe --portable
+   HushDrop-console.exe --portable
    ```
 3. Scan the QR code shown in the console with your phone camera (both devices must be on the same Wi-Fi).
 4. In the opened PWA, enter the 6-digit PIN and verify the TLS fingerprint.
 5. Done! Drag and drop files into the browser window to transfer them.
+
+> **Windows files:** `HushDrop-Desktop.exe` — GUI; `HushDrop.exe` — silent server with no window (for sidecar/autostart, QR not visible); `HushDrop-console.exe` — with console and QR in the terminal.
 
 > **100% portable**: in `--portable` mode all certificates, temp chunks and downloaded files stay strictly in `./data` next to the binary. Nothing is written to the Windows registry or `%APPDATA%`. Runs straight from a USB stick without admin rights.
 
