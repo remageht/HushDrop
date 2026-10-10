@@ -19,7 +19,7 @@ DIST_DIR="$ROOT_DIR/dist"
 mkdir -p "$DIST_DIR"
 
 export CGO_ENABLED=0
-VERSION="0.3.4"
+VERSION="0.3.5"
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.openBrowserDefault=false"
 
 # Linux amd64

@@ -102,9 +102,9 @@ def getAppVersionName() {
     def pkg = file('../../package.json')
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
-        return json.version ?: "0.3.4"
+        return json.version ?: "0.3.5"
     }
-    return "0.3.4"
+    return "0.3.5"
 }
 
 def getAppVersionCode() {
@@ -112,7 +112,7 @@ def getAppVersionCode() {
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
         if (json.versionCode) return json.versionCode.toInteger()
-        def v = json.version ?: "0.3.4"
+        def v = json.version ?: "0.3.5"
         def parts = v.tokenize('.')
         if (parts.size() >= 3) {
             try {
@@ -120,7 +120,7 @@ def getAppVersionCode() {
             } catch (Exception ignored) {}
         }
     }
-    return 34
+    return 35
 }
 `;
     if (gradle.includes("apply plugin: 'com.android.application'")) {
@@ -132,11 +132,11 @@ def getAppVersionCode() {
   }
 
   // 4b. Update versionCode and versionName in defaultConfig
-  if (gradle.includes('versionCode 1') || gradle.includes('versionCode 33') || gradle.includes('versionCode 34')) {
+  if (gradle.includes('versionCode 1') || gradle.match(/versionCode 3\d/)) {
     gradle = gradle.replace(/versionCode \d+/, 'versionCode getAppVersionCode()');
     console.log('  -> Updated versionCode to getAppVersionCode()');
   }
-  if (gradle.includes('versionName "1.0"') || gradle.includes('versionName "0.3.3"') || gradle.includes('versionName "0.3.4"')) {
+  if (gradle.includes('versionName "1.0"') || gradle.match(/versionName "0\.3\.\d"/)) {
     gradle = gradle.replace(/versionName "[^"]*"/, 'versionName getAppVersionName()');
     console.log('  -> Updated versionName to getAppVersionName()');
   }

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-10-09
+
+### Added
+- **GUI Auto-Browser**: the windowless Windows build opens the local PWA in the default browser on start and writes URL/PIN/fingerprint to `data/pairing.txt` (new `--open-browser` flag, Tauri sidecar passes `--open-browser=false`).
+- **Desktop Auto-QR Window**: Tauri parses PIN/fingerprint/URL from the sidecar stdout and opens the pairing window on first start, with copy buttons and toast.
+- **Android Patch Generator**: `mobile/android/` is now fully generated — customizations live in `mobile/android-patches/` + `mobile/scripts/apply-android-custom.*` (no more `git add -f`).
+
+### Changed
+- **Windows Naming**: `HushDrop.exe` is now the GUI (windowless) build, console moved to `HushDrop-console.exe` (scripts, CI, Tauri lookup and docs updated).
+- **Desktop White-Screen Fix**: main window reloads after backend `/health` is OK before being shown.
+- Bumped unified project version to `0.3.5` (Android `versionCode 35`).
+
+---
+
 ## [0.3.4] - 2026-10-06
 
 ### Fixed
