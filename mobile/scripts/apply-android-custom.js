@@ -102,9 +102,9 @@ def getAppVersionName() {
     def pkg = file('../../package.json')
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
-        return json.version ?: "0.3.5"
+        return json.version ?: "0.3.7"
     }
-    return "0.3.5"
+    return "0.3.7"
 }
 
 def getAppVersionCode() {
@@ -112,7 +112,7 @@ def getAppVersionCode() {
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
         if (json.versionCode) return json.versionCode.toInteger()
-        def v = json.version ?: "0.3.5"
+        def v = json.version ?: "0.3.7"
         def parts = v.tokenize('.')
         if (parts.size() >= 3) {
             try {

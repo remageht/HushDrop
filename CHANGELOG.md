@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-10-09
+
+### Added
+- **Nearby Radar**: auto-discovery of HushDrop nodes in the LAN via `POST /api/nearby/scan` (Bearer auth, 15s per-session cooldown with 429). Parallel RFC1918-clamped subnet scan (32 workers, 800ms timeout, cap 256 addresses), peers filtered by `service == "HushDrop"`, no fingerprint in scan responses.
+- **Kotlin Host Parity**: same scan endpoint 1:1 with coroutines, mDNS announcement retained.
+- **PWA Nearby UI**: "Устройства рядом" card with explicit trigger, spinner, empty/error states, one-tap connect into the standard PIN pairing (trust model unchanged).
+
+### Changed
+- Bumped unified project version to `0.3.7` (Android `versionCode 37`).
+
+---
+
 ## [0.3.5] - 2026-10-09
 
 ### Added

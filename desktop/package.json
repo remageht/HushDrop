@@ -1,6 +1,6 @@
 {
   "name": "hushdrop-desktop",
-  "version": "0.3.5",
+  "version": "0.3.7",
   "description": "HushDrop Desktop Tauri 2 Portable Wrapper",
   "private": true,
   "scripts": {
