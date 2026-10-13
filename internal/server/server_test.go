@@ -385,3 +385,62 @@ func TestServer_Clipboard(t *testing.T) {
 	}
 }
 
+func TestServer_NearbyScanRateLimitAndAuth(t *testing.T) {
+	srv, pm, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	clientIP := "127.0.0.1:54321"
+
+	// 1. POST /api/nearby/scan without token -> 401 Unauthorized
+	req := httptest.NewRequest(http.MethodPost, "/api/nearby/scan", nil)
+	req.RemoteAddr = clientIP
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized without Bearer token, got %d", rec.Code)
+	}
+
+	// 2. Generate valid session
+	pin, token, _ := pm.GetActivePairingDetails()
+	session, _, err := pm.VerifyPairing("127.0.0.1", pin, token, "")
+	if err != nil {
+		t.Fatalf("pairing failed: %v", err)
+	}
+	accessToken := session.AccessToken
+
+	// 3. First scan with valid session token -> 200 OK
+	req = httptest.NewRequest(http.MethodPost, "/api/nearby/scan", bytes.NewReader([]byte("{}")))
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on first scan, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	// 4. Immediate second scan with same session token (<15s) -> 429 Too Many Requests
+	req = httptest.NewRequest(http.MethodPost, "/api/nearby/scan", bytes.NewReader([]byte("{}")))
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests on immediate second scan, got %d", rec.Code)
+	}
+
+	retryAfter := rec.Header().Get("Retry-After")
+	if retryAfter == "" {
+		t.Fatalf("expected Retry-After header on 429 response")
+	}
+
+	var errResp map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
+	if !strings.Contains(errResp["error"], "rate limit") {
+		t.Fatalf("expected rate limit error message, got: %v", errResp["error"])
+	}
+}
+
+

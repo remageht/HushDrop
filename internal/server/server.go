@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"hushdrop/internal/clipboard"
 	"hushdrop/internal/config"
 	"hushdrop/internal/crypto"
+	"hushdrop/internal/discovery"
 	"hushdrop/internal/pair"
 	"hushdrop/internal/transfer"
 )
@@ -23,6 +25,9 @@ type Server struct {
 	transferManager  *transfer.Manager
 	clipboardManager *clipboard.Manager
 	limiter          *ipRateLimiter
+	nearbyScanner    *discovery.Scanner
+	scanMu           sync.Mutex
+	scanCooldowns    map[string]time.Time
 	httpServer       *http.Server
 	certHTTPServer   *http.Server
 }
@@ -54,6 +59,8 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 		transferManager:  tm,
 		clipboardManager: clipboard.NewManager(),
 		limiter:          newRateLimiter(cfg.RateLimitPerMinute, time.Minute),
+		nearbyScanner:    discovery.NewScanner(32, 800*time.Millisecond),
+		scanCooldowns:    make(map[string]time.Time),
 	}
 
 	mux := http.NewServeMux()
@@ -66,6 +73,7 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	mux.HandleFunc("/api/revoke", s.handleRevoke)
 	mux.HandleFunc("/api/files", s.handleFilesList)
 	mux.HandleFunc("/api/clipboard", s.handleClipboard)
+	mux.HandleFunc("/api/nearby/scan", s.handleNearbyScan)
 	mux.HandleFunc("/api/upload", s.handleUploadChunk)
 	mux.HandleFunc("/api/download", s.handleDownload)
 	mux.HandleFunc("/cert", s.handleCertDownload)

@@ -5,6 +5,7 @@ import { SendPage } from './pages/SendPage';
 import { ReceivePage } from './pages/ReceivePage';
 import { HostPage } from './pages/HostPage';
 import { ClipboardCard } from './components/ClipboardCard';
+import { NearbyRadar } from './components/NearbyRadar';
 import { apiClient } from './api/client';
 import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio, CheckCircle } from 'lucide-react';
 import {
@@ -20,6 +21,7 @@ export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(apiClient.isAuthenticated());
   const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'host'>('home');
   const [showPairing, setShowPairing] = useState(false);
+  const [pairingHost, setPairingHost] = useState<string | undefined>(undefined);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingShareCount, setPendingShareCount] = useState<number>(getPendingSharedQueue().length);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -136,14 +138,19 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {!isAuthenticated && showPairing && (
+      {showPairing && (
         <PairingModal
+          targetHost={pairingHost}
           onSuccess={async () => {
             setIsAuthenticated(true);
             setShowPairing(false);
+            setPairingHost(undefined);
             await drainSharedQueue();
           }}
-          onClose={() => setShowPairing(false)}
+          onClose={() => {
+            setShowPairing(false);
+            setPairingHost(undefined);
+          }}
         />
       )}
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-6">
@@ -253,6 +260,17 @@ export const App: React.FC = () => {
                 )}
               </div>
             </div>
+
+            <NearbyRadar
+              isAuthenticated={isAuthenticated}
+              onConnect={(node) => {
+                setPairingHost(`https://${node.ip}:${node.port}`);
+                setShowPairing(true);
+              }}
+              onRequireAuth={() => {
+                setShowPairing(true);
+              }}
+            />
 
             {isAuthenticated && <ClipboardCard />}
 

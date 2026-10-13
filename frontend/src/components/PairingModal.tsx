@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { KeyRound, ShieldAlert, ShieldCheck, Loader2, QrCode, X } from 'lucide-react';
+import { KeyRound, ShieldAlert, ShieldCheck, Loader2, QrCode, X, Radio } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { PairInfoResponse } from '../types';
 
 interface PairingModalProps {
   onSuccess: () => void;
   onClose?: () => void;
+  targetHost?: string;
 }
 
-export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose }) => {
+export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, targetHost }) => {
   const [pin, setPin] = useState('');
   const [token, setToken] = useState('');
   const [urlFp, setUrlFp] = useState<string | null>(null);
@@ -18,6 +19,10 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose }
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (targetHost) {
+      apiClient.setServerBaseUrl(targetHost);
+    }
+
     // Extract query parameters from QR scan
     const params = new URLSearchParams(window.location.search);
     const paramToken = params.get('token');
@@ -36,12 +41,12 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose }
         }
       })
       .catch((err) => {
-        setErrorMessage(err.message);
+        setErrorMessage(err.message || 'Не удалось подключиться к узлу');
       })
       .finally(() => {
         setIsFetchingInfo(false);
       });
-  }, []);
+  }, [targetHost]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,8 +94,14 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose }
           </div>
           <h2 className="text-xl font-bold text-white">Сопряжение устройств</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Введите PIN-код, отображаемый на главном экране ПК
+            Введите PIN-код, отображаемый на экране второго узла
           </p>
+          {targetHost && (
+            <div className="mt-2.5 inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/80 text-[11px] text-emerald-400 font-mono">
+              <Radio className="w-3 h-3 animate-pulse" />
+              <span>Узел: {targetHost.replace(/^https?:\/\//, '')}</span>
+            </div>
+          )}
         </div>
 
         {/* TLS Fingerprint verification */}

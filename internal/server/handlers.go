@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"hushdrop/internal/clipboard"
+	"hushdrop/internal/discovery"
 )
 
 type PairRequest struct {
@@ -29,11 +32,15 @@ type ClipboardRequest struct {
 	BurnAfterRead bool   `json:"burnAfterRead"`
 }
 
+type ScanRequest struct {
+	Ports []int `json:"ports,omitempty"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"service":   "HushDrop",
-		"version":   "0.3.5",
+		"version":   "0.3.7",
 		"timestamp": time.Now().Unix(),
 	})
 }
@@ -150,6 +157,11 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	// Clear and zeroize in-memory clipboard
 	s.clipboardManager.Clear()
 
+	// Reset scan cooldowns
+	s.scanMu.Lock()
+	s.scanCooldowns = make(map[string]time.Time)
+	s.scanMu.Unlock()
+
 	respondJSON(w, http.StatusOK, map[string]string{
 		"message": "All sessions revoked, keys zeroized, and files cleared",
 	})
@@ -224,6 +236,75 @@ func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleNearbyScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Session token rate limit: at most 1 scan per 15s per session
+	authHeader := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "Unauthorized: missing bearer token",
+		})
+		return
+	}
+
+	s.scanMu.Lock()
+	now := time.Now()
+	if lastScan, exists := s.scanCooldowns[token]; exists {
+		elapsed := now.Sub(lastScan)
+		if elapsed < 15*time.Second {
+			s.scanMu.Unlock()
+			remaining := int(math.Ceil((15*time.Second - elapsed).Seconds()))
+			if remaining < 1 {
+				remaining = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(remaining))
+			respondJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error": fmt.Sprintf("Scan rate limit exceeded. Please wait %d seconds.", remaining),
+			})
+			return
+		}
+	}
+	s.scanCooldowns[token] = now
+	s.scanMu.Unlock()
+
+	// 2. Parse optional body
+	var req ScanRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+	}
+
+	// 3. Discover local primary subnet
+	subnet, _, err := discovery.GetPrimarySubnet()
+	if err != nil {
+		log.Printf("[NEARBY_SCAN] No primary RFC 1918 subnet found: %v", err)
+		respondJSON(w, http.StatusOK, []discovery.DiscoveredNode{})
+		return
+	}
+
+	// 4. Generate candidate IPs (cap 256, RFC 1918 only)
+	ips, err := discovery.GenerateSubnetIPs(subnet, 256)
+	if err != nil {
+		log.Printf("[NEARBY_SCAN] Failed to generate subnet IPs: %v", err)
+		respondJSON(w, http.StatusOK, []discovery.DiscoveredNode{})
+		return
+	}
+
+	// 5. Execute parallel probing with concurrency 32, timeout 800ms
+	nodes := s.nearbyScanner.Scan(ips, req.Ports, s.config.Port)
+	if nodes == nil {
+		nodes = []discovery.DiscoveredNode{}
+	}
+
+	clientIP := extractIP(r)
+	log.Printf("[NEARBY_SCAN] Scan completed for masked IP %s: %d nodes found", MaskIP(clientIP), len(nodes))
+	respondJSON(w, http.StatusOK, nodes)
 }
 
 func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {

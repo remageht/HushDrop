@@ -2,6 +2,13 @@ import { FileItem, PairInfoResponse, PairSession, ClipboardItem } from '../types
 
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
 
+export interface NearbyNode {
+  ip: string;
+  port: number;
+  version: string;
+  latencyMs: number;
+}
+
 export type AuthListener = (isAuthenticated: boolean) => void;
 
 class ApiClient {
@@ -106,8 +113,17 @@ class ApiClient {
     }
 
     if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After') || '60';
-      throw new Error(`Превышен лимит запросов (20/мин). Подождите ${retryAfter} сек.`);
+      const retryAfter = response.headers.get('Retry-After') || '15';
+      let errMsg = `Превышен лимит запросов. Подождите ${retryAfter} сек.`;
+      try {
+        const body = await response.json();
+        if (body && body.error) {
+          errMsg = body.error;
+        }
+      } catch {
+        // Fallback
+      }
+      throw new Error(errMsg);
     }
 
     if (!response.ok) {
@@ -350,6 +366,16 @@ class ApiClient {
   public async clearClipboard(): Promise<void> {
     await this.request('/api/clipboard', {
       method: 'DELETE',
+    });
+  }
+
+  public async scanNearby(ports?: number[]): Promise<NearbyNode[]> {
+    return this.request<NearbyNode[]>('/api/nearby/scan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: ports && ports.length > 0 ? JSON.stringify({ ports }) : undefined,
     });
   }
 }

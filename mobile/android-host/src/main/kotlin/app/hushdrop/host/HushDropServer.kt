@@ -12,14 +12,29 @@ import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URL
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLServerSocket
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class HushDropServer(
     private val context: Context,
@@ -32,6 +47,7 @@ class HushDropServer(
     private val tag = "HushDropServer"
     private val isRunning = AtomicBoolean(false)
     private val threadPool = Executors.newCachedThreadPool()
+    private val scanCooldowns = ConcurrentHashMap<String, Long>()
 
     private var httpsServerSocket: SSLServerSocket? = null
     private var httpServerSocket: ServerSocket? = null
@@ -74,6 +90,19 @@ class HushDropServer(
             }
             // IPv6 link-local or ULA
             if (ip.startsWith("fe80:") || ip.startsWith("fc00:") || ip.startsWith("fd00:")) return true
+            return false
+        }
+
+        fun isRfc1918(addr: InetAddress): Boolean {
+            val ip = addr.hostAddress ?: return false
+            if (ip.startsWith("192.168.") || ip.startsWith("10.")) return true
+            if (ip.startsWith("172.")) {
+                val parts = ip.split(".")
+                if (parts.size >= 2) {
+                    val second = parts[1].toIntOrNull()
+                    if (second != null && second in 16..31) return true
+                }
+            }
             return false
         }
     }
@@ -212,6 +241,7 @@ class HushDropServer(
                     path == "/api/pair/info" ||
                     path == "/cert"
 
+            var sessionToken = ""
             if (!isPublic && path.startsWith("/api/")) {
                 val authHeader = headers["authorization"]
                 if (authHeader == null || !authHeader.startsWith("Bearer ")) {
@@ -234,6 +264,7 @@ class HushDropServer(
                     socket.close()
                     return
                 }
+                sessionToken = token
             }
 
             // 6. Route HTTPS request
@@ -247,6 +278,7 @@ class HushDropServer(
                 path == "/api/clipboard" && method == "GET" -> handleGetClipboard(output)
                 path == "/api/clipboard" && method == "POST" -> handlePostClipboard(input, output, headers)
                 path == "/api/clipboard" && method == "DELETE" -> handleDeleteClipboard(output)
+                path == "/api/nearby/scan" && method == "POST" -> handleNearbyScan(input, output, headers, clientIp, sessionToken)
                 path == "/api/upload" && method == "POST" -> handleUpload(input, output, headers)
                 path == "/api/download" && method == "GET" -> handleDownload(output, queryString, headers)
                 path == "/cert" && method == "GET" -> handleCertDownload(output)
@@ -270,7 +302,7 @@ class HushDropServer(
         val json = JSONObject().apply {
             put("status", "ok")
             put("service", "HushDrop")
-            put("version", "0.3.5")
+            put("version", "0.3.7")
             put("timestamp", System.currentTimeMillis() / 1000L)
         }
         sendResponse(out, 200, "OK", "application/json", json.toString())
@@ -360,6 +392,7 @@ class HushDropServer(
             clipboardBurnAfterRead = false
             clipboardUpdatedAt = 0L
         }
+        scanCooldowns.clear()
 
         val json = JSONObject().apply {
             put("message", "All sessions revoked, keys zeroized, and files cleared")
@@ -469,6 +502,174 @@ class HushDropServer(
             put("message", "Clipboard cleared and zeroized")
         }
         sendResponse(out, 200, "OK", "application/json", resp.toString())
+    }
+
+    private fun handleNearbyScan(
+        input: InputStream,
+        out: OutputStream,
+        headers: Map<String, String>,
+        clientIp: String,
+        sessionToken: String
+    ) {
+        val now = System.currentTimeMillis()
+        val lastScan = scanCooldowns[sessionToken] ?: 0L
+        val elapsed = now - lastScan
+        if (elapsed < 15_000L) {
+            val remaining = ((15_000L - elapsed + 999L) / 1000L).toInt().coerceAtLeast(1)
+            sendResponse(
+                out, 429, "Too Many Requests", "application/json",
+                "{\"error\":\"Scan rate limit exceeded. Please wait $remaining seconds.\"}",
+                listOf("Retry-After: $remaining")
+            )
+            return
+        }
+        scanCooldowns[sessionToken] = now
+
+        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+        val customPorts = mutableListOf<Int>()
+        if (contentLength in 1..4096) {
+            try {
+                val bodyStr = readBodyString(input, contentLength)
+                val json = JSONObject(bodyStr)
+                val portsArr = json.optJSONArray("ports")
+                if (portsArr != null) {
+                    for (i in 0 until minOf(portsArr.length(), 4)) {
+                        val p = portsArr.optInt(i)
+                        if (p in 1..65535) customPorts.add(p)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Discover candidate IPs from primary RFC 1918 interface
+        val candidateIps = mutableListOf<String>()
+        val localIps = mutableSetOf("127.0.0.1", "::1")
+
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val nif = interfaces.nextElement()
+                if (!nif.isUp || nif.isLoopback) continue
+                for (ia in nif.interfaceAddresses) {
+                    val addr = ia.address
+                    if (addr is Inet4Address) {
+                        val ipStr = addr.hostAddress ?: continue
+                        localIps.add(ipStr)
+                        if (candidateIps.isEmpty() && isRfc1918(addr)) {
+                            var prefix = ia.networkPrefixLength.toInt()
+                            if (prefix < 24) prefix = 24 // clamp to /24
+
+                            val rawBytes = addr.address
+                            val ipInt = ((rawBytes[0].toInt() and 0xFF) shl 24) or
+                                    ((rawBytes[1].toInt() and 0xFF) shl 16) or
+                                    ((rawBytes[2].toInt() and 0xFF) shl 8) or
+                                    (rawBytes[3].toInt() and 0xFF)
+                            val mask = if (prefix == 0) 0 else (-1 shl (32 - prefix))
+                            val netInt = ipInt and mask
+                            val hostCount = minOf((1 shl (32 - prefix)) - 2, 256)
+
+                            for (h in 1..hostCount) {
+                                val hostInt = netInt + h
+                                val hostStr = "${(hostInt ushr 24) and 0xFF}.${(hostInt ushr 16) and 0xFF}.${(hostInt ushr 8) and 0xFF}.${hostInt and 0xFF}"
+                                candidateIps.add(hostStr)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "[NEARBY_SCAN] Error resolving interfaces: ${e.message}")
+        }
+
+        val hasCustomPorts = customPorts.isNotEmpty()
+        val portsToScan = if (hasCustomPorts) customPorts else listOf(8443)
+
+        data class ProbeTarget(val ip: String, val port: Int)
+        val targets = mutableListOf<ProbeTarget>()
+
+        for (ip in candidateIps) {
+            val isLocal = localIps.contains(ip)
+            for (p in portsToScan) {
+                if (isLocal && p == httpsPort) continue // Skip self
+                targets.add(ProbeTarget(ip, p))
+            }
+            if (isLocal && !hasCustomPorts && httpsPort != 8444) {
+                targets.add(ProbeTarget(ip, 8444))
+            }
+        }
+
+        if (!hasCustomPorts && httpsPort == 8443) {
+            targets.add(ProbeTarget("127.0.0.1", 8444))
+        } else if (!hasCustomPorts && httpsPort == 8444) {
+            targets.add(ProbeTarget("127.0.0.1", 8443))
+        }
+
+        data class DiscoveredPeer(val ip: String, val port: Int, val version: String, val latencyMs: Long)
+        val discovered = mutableListOf<DiscoveredPeer>()
+
+        if (targets.isNotEmpty()) {
+            val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+                override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+            })
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, trustAll, java.security.SecureRandom())
+            }
+            val sslSocketFactory = sslContext.socketFactory
+            val hostVerifier = HostnameVerifier { _, _ -> true }
+
+            val semaphore = Semaphore(32)
+
+            runBlocking(Dispatchers.IO) {
+                val jobs = targets.map { target ->
+                    async {
+                        semaphore.withPermit {
+                            try {
+                                val url = URL("https://${target.ip}:${target.port}/health")
+                                val conn = url.openConnection() as HttpsURLConnection
+                                conn.sslSocketFactory = sslSocketFactory
+                                conn.hostnameVerifier = hostVerifier
+                                conn.connectTimeout = 800
+                                conn.readTimeout = 800
+                                conn.requestMethod = "GET"
+                                val start = System.currentTimeMillis()
+                                conn.connect()
+                                if (conn.responseCode == 200) {
+                                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                                    val json = JSONObject(text)
+                                    if (json.optString("service") == "HushDrop") {
+                                        val latency = maxOf(1L, System.currentTimeMillis() - start)
+                                        val ver = json.optString("version", "unknown")
+                                        synchronized(discovered) {
+                                            discovered.add(DiscoveredPeer(target.ip, target.port, ver, latency))
+                                        }
+                                    }
+                                }
+                                conn.disconnect()
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+                jobs.awaitAll()
+            }
+        }
+
+        discovered.sortBy { it.latencyMs }
+
+        val jsonArray = JSONArray()
+        for (node in discovered) {
+            val obj = JSONObject().apply {
+                put("ip", node.ip)
+                put("port", node.port)
+                put("version", node.version)
+                put("latencyMs", node.latencyMs)
+            }
+            jsonArray.put(obj)
+        }
+
+        Log.i(tag, "[NEARBY_SCAN] Completed for ${maskIp(clientIp)}: ${discovered.size} peers found")
+        sendResponse(out, 200, "OK", "application/json", jsonArray.toString())
     }
 
     private fun handleUpload(input: InputStream, out: OutputStream, headers: Map<String, String>) {
