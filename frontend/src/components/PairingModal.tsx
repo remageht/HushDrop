@@ -69,6 +69,11 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, 
   };
 
   const isFpMatched = urlFp && serverInfo?.fingerprint && urlFp === serverInfo.fingerprint;
+  const shortFp = (fp: string) => {
+    const groups = fp.split(':');
+    if (groups.length < 8) return fp;
+    return `${groups.slice(0, 4).join(':')}…${groups.slice(-4).join(':')}`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
@@ -114,14 +119,21 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, 
                   <ShieldCheck className="w-3.5 h-3.5 mr-1" /> Сверен с QR
                 </span>
               ) : (
-                <span className="flex items-center text-slate-400 font-medium text-[11px]">
-                  <ShieldCheck className="w-3.5 h-3.5 mr-1 text-emerald-400" /> Защищено
+                <span className="flex items-center text-amber-400 font-medium text-[11px]">
+                  <ShieldAlert className="w-3.5 h-3.5 mr-1" /> Сверьте вручную
                 </span>
               )}
             </div>
             <p className="font-mono text-[11px] text-slate-300 break-all bg-slate-900/90 p-2 rounded-lg border border-slate-800/80">
               {serverInfo.fingerprint}
             </p>
+            {!isFpMatched && (
+              <p className="mt-2 text-[11px] leading-relaxed text-amber-400/90">
+                Сравните с экраном {targetHost ? 'найденного узла' : 'второго устройства'} — достаточно первые и последние 4 группы:{' '}
+                <span className="font-mono text-amber-300">{shortFp(serverInfo.fingerprint)}</span>.
+                Совпало — вводите PIN.
+              </p>
+            )}
           </div>
         )}
 
