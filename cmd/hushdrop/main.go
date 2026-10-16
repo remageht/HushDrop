@@ -23,7 +23,7 @@ import (
 	"hushdrop/internal/transfer"
 )
 
-var version = "0.3.7"
+var version = "0.3.8"
 
 // openBrowserDefault is overridden per build via ldflags:
 // console build -> "false", GUI (windowsgui) build -> "true".

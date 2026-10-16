@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-10-16
+
+### Fixed
+- **Security Review Pass** (Go / Kotlin / PWA / Desktop): request body caps with 413 (pair 64KB, clipboard 2MB), upload init requires `Content-Length` plus strict per-chunk metadata validation, `Content-Disposition`/filename sanitization, helper landing page host escaping, security headers (`nosniff`, `DENY`, `no-referrer`, `no-store`), `ReadHeaderTimeout` (Slowloris), per-token + per-IP scan cooldown with a single active scan.
+- **Session & State Races**: TOCTOU-safe IP-ban re-check in `VerifyPairing`, session activity race fix, stale tracker/`refreshIndex` cleanup (15 min idle), idempotent chunk writes with metadata snapshots, stale `*.part` cleanup on server start.
+- **Desktop**: tray "Forget Everything" now revokes sessions through the authenticated webview (the old plain HTTP call silently failed), QR window HTML/JS escaping for pin/fingerprint/URL.
+- **PWA**: single-flight token refresh with offline vs invalid distinction, one retry on 401, 429 `Retry-After` message, empty-file rejection, switching server resets the session, origin-scoped service worker (cache `hushdrop-v2`), pairing secrets stripped from URL/history.
+- **Android**: WebView remote debugging disabled, TLS 1.2/1.3 only, suffix `Range` support with 416, case-insensitive `Bearer`, request line/header count caps.
+
+### Changed
+- Bumped unified project version to `0.3.8` (Android `versionCode 38`).
+
+---
+
 ## [0.3.7] - 2026-10-09
 
 ### Added

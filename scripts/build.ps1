@@ -22,7 +22,7 @@ if (!(Test-Path $distDir)) {
 }
 
 $env:CGO_ENABLED = "0"
-$version = "0.3.7"
+$version = "0.3.8"
 $ldflags = "-s -w -X main.version=$version -X main.openBrowserDefault=false"
 
 # Windows amd64 (console + GUI builds from the same code)
