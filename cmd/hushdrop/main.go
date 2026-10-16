@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,6 +75,16 @@ func main() {
 	// Initialize Pairing Manager
 	pairManager := pair.NewManager(cfg.PinTTL, cfg.SessionInactivityTTL, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	pin, token, _ := pairManager.GetActivePairingDetails()
+
+	// Remove stale partial uploads from previous runs (upload state lives in memory only,
+	// so leftover .part files can never be resumed and would leak disk space)
+	if entries, err := os.ReadDir(cfg.TempDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".part") {
+				_ = os.Remove(filepath.Join(cfg.TempDir, entry.Name()))
+			}
+		}
+	}
 
 	// Initialize Transfer Manager
 	transferManager := transfer.NewManager(cfg.DownloadsDir, cfg.TempDir, cfg.MaxChunkSize, cfg.MaxFileSize)

@@ -17,7 +17,7 @@ data class HostSession(
     val createdAt: Long,
     val accessExpiresAt: Long,
     val refreshExpiresAt: Long,
-    var lastActivity: Long,
+    @Volatile var lastActivity: Long,
     var sharedKey: ByteArray?
 )
 
@@ -32,7 +32,8 @@ data class PairResult(
 
 private data class IpBanTracker(
     var failedAttempts: Int = 0,
-    var bannedUntil: Long = 0L
+    var bannedUntil: Long = 0L,
+    var lastSeen: Long = 0L
 )
 
 class PairManager(
@@ -119,9 +120,11 @@ class PairManager(
 
     private fun recordFailedAttempt(ip: String) {
         val tracker = ipAttempts.getOrPut(ip) { IpBanTracker() }
+        val now = System.currentTimeMillis()
+        tracker.lastSeen = now
         tracker.failedAttempts++
         if (tracker.failedAttempts >= 5) {
-            tracker.bannedUntil = System.currentTimeMillis() + (5 * 60 * 1000L) // 5 minutes ban
+            tracker.bannedUntil = now + (5 * 60 * 1000L) // 5 minutes ban
             tracker.failedAttempts = 0
         }
     }
@@ -267,6 +270,7 @@ class PairManager(
         if (now - session.lastActivity > inactivityTtlMs) {
             lock.write {
                 sessions.remove(accessToken)
+                refreshIndex.remove(session.refreshToken)
                 session.sharedKey?.let { zeroize(it) }
             }
             return null
@@ -309,11 +313,11 @@ class PairManager(
             }
         }
 
-        // Clean up expired bans
+        // Clean up stale attempt trackers: expired bans and IPs idle for 15+ minutes
         val banIterator = ipAttempts.entries.iterator()
         while (banIterator.hasNext()) {
             val entry = banIterator.next()
-            if (now > entry.value.bannedUntil && entry.value.failedAttempts == 0) {
+            if (now > entry.value.bannedUntil && (now - entry.value.lastSeen) > 15 * 60 * 1000L) {
                 banIterator.remove()
             }
         }

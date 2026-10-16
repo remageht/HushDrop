@@ -192,6 +192,21 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+
+		// Pairing responses carry secrets: never cache them
+		if r.URL.Path == "/api/pair" || r.URL.Path == "/api/pair/refresh" || r.URL.Path == "/api/pair/info" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

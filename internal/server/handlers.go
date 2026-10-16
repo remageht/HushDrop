@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"math"
@@ -15,6 +17,11 @@ import (
 
 	"hushdrop/internal/clipboard"
 	"hushdrop/internal/discovery"
+)
+
+const (
+	maxPairBodySize      = 64 << 10
+	maxClipboardBodySize = 2 << 20
 )
 
 type PairRequest struct {
@@ -76,8 +83,13 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req PairRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPairBodySize)).Decode(&req); err != nil {
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		respondJSON(w, status, map[string]string{
 			"error": "Invalid request body",
 		})
 		return
@@ -115,8 +127,13 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPairBodySize)).Decode(&req); err != nil {
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		respondJSON(w, status, map[string]string{
 			"error": "Invalid request body",
 		})
 		return
@@ -208,8 +225,13 @@ func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var req ClipboardRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondJSON(w, http.StatusBadRequest, map[string]string{
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxClipboardBodySize)).Decode(&req); err != nil {
+			status := http.StatusBadRequest
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			respondJSON(w, status, map[string]string{
 				"error": "Invalid request body",
 			})
 			return
@@ -244,7 +266,7 @@ func (s *Server) handleNearbyScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Session token rate limit: at most 1 scan per 15s per session
+	// 1. Scan rate limits: 15s cooldown per session AND per client IP, single scan at a time
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == "" {
@@ -254,25 +276,55 @@ func (s *Server) handleNearbyScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := extractIP(r)
+
 	s.scanMu.Lock()
 	now := time.Now()
-	if lastScan, exists := s.scanCooldowns[token]; exists {
-		elapsed := now.Sub(lastScan)
-		if elapsed < 15*time.Second {
-			s.scanMu.Unlock()
-			remaining := int(math.Ceil((15*time.Second - elapsed).Seconds()))
-			if remaining < 1 {
-				remaining = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(remaining))
-			respondJSON(w, http.StatusTooManyRequests, map[string]string{
-				"error": fmt.Sprintf("Scan rate limit exceeded. Please wait %d seconds.", remaining),
-			})
-			return
+
+	// Drop stale cooldown entries so the map cannot grow unbounded
+	for key, last := range s.scanCooldowns {
+		if now.Sub(last) > time.Minute {
+			delete(s.scanCooldowns, key)
 		}
 	}
-	s.scanCooldowns[token] = now
+
+	if s.scanActive {
+		s.scanMu.Unlock()
+		w.Header().Set("Retry-After", "2")
+		respondJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Another scan is already in progress. Please wait a few seconds.",
+		})
+		return
+	}
+
+	for _, key := range []string{"t:" + token, "i:" + clientIP} {
+		if lastScan, exists := s.scanCooldowns[key]; exists {
+			elapsed := now.Sub(lastScan)
+			if elapsed < 15*time.Second {
+				s.scanMu.Unlock()
+				remaining := int(math.Ceil((15*time.Second - elapsed).Seconds()))
+				if remaining < 1 {
+					remaining = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(remaining))
+				respondJSON(w, http.StatusTooManyRequests, map[string]string{
+					"error": fmt.Sprintf("Scan rate limit exceeded. Please wait %d seconds.", remaining),
+				})
+				return
+			}
+		}
+	}
+
+	s.scanCooldowns["t:"+token] = now
+	s.scanCooldowns["i:"+clientIP] = now
+	s.scanActive = true
 	s.scanMu.Unlock()
+
+	defer func() {
+		s.scanMu.Lock()
+		s.scanActive = false
+		s.scanMu.Unlock()
+	}()
 
 	// 2. Parse optional body
 	var req ScanRequest
@@ -302,7 +354,6 @@ func (s *Server) handleNearbyScan(w http.ResponseWriter, r *http.Request) {
 		nodes = []discovery.DiscoveredNode{}
 	}
 
-	clientIP := extractIP(r)
 	log.Printf("[NEARBY_SCAN] Scan completed for masked IP %s: %d nodes found", MaskIP(clientIP), len(nodes))
 	respondJSON(w, http.StatusOK, nodes)
 }
@@ -342,8 +393,14 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Content-Length check for chunk limit (<= 4MB)
+	// Chunked transfer encoding is not supported for uploads: a declared size is required
 	chunkSize := r.ContentLength
+	if chunkSize < 0 {
+		respondJSON(w, http.StatusLengthRequired, map[string]string{
+			"error": "Content-Length header is required (chunked encoding is not supported)",
+		})
+		return
+	}
 	if chunkSize > s.config.MaxChunkSize {
 		respondJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
 			"error": fmt.Sprintf("Chunk size %d exceeds 4MB limit", chunkSize),
@@ -352,7 +409,13 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initialize upload on chunk 0 or first encounter
-	fileSize, _ := strconv.ParseInt(fileSizeStr, 10, 64)
+	fileSize, err := strconv.ParseInt(strings.TrimSpace(fileSizeStr), 10, 64)
+	if err != nil || fileSize <= 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Invalid or missing X-File-Size header",
+		})
+		return
+	}
 	if fileSize > s.config.MaxFileSize {
 		respondJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
 			"error": fmt.Sprintf("Total file size %d exceeds 5GB limit", fileSize),
@@ -365,7 +428,7 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("[UPLOAD_INIT_ERR] File %s: %v", MaskFilename(fileName), err)
 			respondJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "Failed to initialize upload session: " + err.Error(),
+				"error": "Failed to initialize upload session",
 			})
 			return
 		}
@@ -449,8 +512,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Security-Warning", "Potentially executable file")
 	}
 
-	// Content Disposition
-	safeFilename := strings.ReplaceAll(meta.CleanName, `"`, `_`)
+	// Content Disposition (strip CR/LF/quotes defensively against header injection)
+	safeFilename := strings.NewReplacer(`"`, `_`, "\r", "_", "\n", "_").Replace(meta.CleanName)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeFilename))
 	w.Header().Set("Accept-Ranges", "bytes")
 
@@ -481,7 +544,10 @@ func (s *Server) handleHTTPHelperLanding(w http.ResponseWriter, r *http.Request)
 	if h, _, err := net.SplitHostPort(r.Host); err == nil {
 		host = h
 	}
-	httpsURL := fmt.Sprintf("https://%s:%d/", host, s.config.Port)
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	httpsURL := html.EscapeString(fmt.Sprintf("https://%s:%d/", host, s.config.Port))
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="ru">

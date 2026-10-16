@@ -11,12 +11,15 @@ export interface NearbyNode {
 
 export type AuthListener = (isAuthenticated: boolean) => void;
 
+type RefreshResult = 'ok' | 'invalid' | 'offline';
+
 class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
   private fingerprint: string | null = null;
   private serverBaseUrl: string = '';
   private authListeners: Set<AuthListener> = new Set();
+  private refreshPromise: Promise<RefreshResult> | null = null;
 
   constructor() {
     this.accessToken = sessionStorage.getItem('hushdrop_access_token');
@@ -26,7 +29,12 @@ class ApiClient {
   }
 
   public setServerBaseUrl(url: string) {
-    this.serverBaseUrl = url.trim().replace(/\/+$/, '');
+    const normalized = url.trim().replace(/\/+$/, '');
+    // Sessions are bound to a specific node: switching hosts invalidates stored tokens
+    if (this.serverBaseUrl && this.serverBaseUrl !== normalized && this.accessToken) {
+      this.clearSession();
+    }
+    this.serverBaseUrl = normalized;
     sessionStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
     localStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
   }
@@ -104,12 +112,13 @@ class ApiClient {
 
     if (response.status === 401 && !isRetry && this.refreshToken) {
       const refreshed = await this.tryRefresh();
-      if (refreshed) {
+      if (refreshed === 'ok') {
         return this.request<T>(endpoint, options, true);
-      } else {
-        this.clearSession();
+      }
+      if (refreshed === 'invalid') {
         throw new Error('Сессия истекла. Пожалуйста, подтвердите PIN повторно.');
       }
+      throw new Error('Нет связи с узлом. Проверьте, что сервер запущен.');
     }
 
     if (response.status === 429) {
@@ -142,29 +151,74 @@ class ApiClient {
     return response.json();
   }
 
-  private async tryRefresh(): Promise<boolean> {
-    if (!this.refreshToken) return false;
+  // Single-flight refresh: concurrent 401s share one rotation attempt, otherwise the
+  // server-side rotation revokes the session out from under other in-flight requests.
+  private tryRefresh(): Promise<RefreshResult> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.performRefresh().finally(() => {
+        this.refreshPromise = null;
+      });
+    }
+    return this.refreshPromise;
+  }
+
+  private async performRefresh(): Promise<RefreshResult> {
+    const attempted = this.refreshToken;
+    if (!attempted) return 'invalid';
+
+    let resp: Response;
     try {
-      const resp = await fetch(this.resolveUrl('/api/pair/refresh'), {
+      resp = await fetch(this.resolveUrl('/api/pair/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.refreshToken }),
+        body: JSON.stringify({ refreshToken: attempted }),
       });
-      if (resp.ok) {
-        const data = await resp.json();
-        this.saveSession({
-          accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
-          accessExpiresIn: data.accessExpiresIn,
-          refreshExpiresIn: data.refreshExpiresIn,
-          fingerprint: this.fingerprint || '',
-        });
-        return true;
-      }
     } catch {
-      // refresh failure
+      return 'offline';
     }
-    return false;
+
+    if (resp.ok) {
+      const data = await resp.json();
+      this.saveSession({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        accessExpiresIn: data.accessExpiresIn,
+        refreshExpiresIn: data.refreshExpiresIn,
+        fingerprint: this.fingerprint || '',
+      });
+      return 'ok';
+    }
+
+    if (resp.status === 400 || resp.status === 401) {
+      // Only clear if our attempt is still the current token: a concurrent
+      // request may have already rotated it successfully.
+      if (this.refreshToken === attempted) {
+        this.clearSession();
+      }
+      return 'invalid';
+    }
+
+    return 'offline';
+  }
+
+  // fetch() with the current Bearer token, transparently refreshing once on 401
+  private async fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<Response> {
+    const doFetch = () => {
+      const headers = new Headers(options.headers || {});
+      if (this.accessToken && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${this.accessToken}`);
+      }
+      return fetch(this.resolveUrl(endpoint), { ...options, headers });
+    };
+
+    let response = await doFetch();
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.tryRefresh();
+      if (refreshed === 'ok') {
+        response = await doFetch();
+      }
+    }
+    return response;
   }
 
   // API Methods
@@ -243,11 +297,7 @@ class ApiClient {
       'X-File-Size': String(fileSize),
     });
 
-    if (this.accessToken) {
-      headers.set('Authorization', `Bearer ${this.accessToken}`);
-    }
-
-    const response = await fetch(this.resolveUrl('/api/upload'), {
+    const response = await this.fetchWithAuth('/api/upload', {
       method: 'POST',
       headers,
       body: chunkBlob,
@@ -256,6 +306,11 @@ class ApiClient {
 
     if (response.status === 413) {
       throw new Error('Размер чанка превышает 4МБ или файл более 5ГБ.');
+    }
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After') || '60';
+      throw new Error(`Превышен лимит запросов. Подождите ${retryAfter} сек. и продолжите передачу.`);
     }
 
     if (!response.ok) {
@@ -275,8 +330,12 @@ class ApiClient {
     onProgress: (percent: number, speedBytesPerSec: number, etaSeconds: number) => void,
     signal?: AbortSignal
   ): Promise<FileItem | undefined> {
+    if (file.size <= 0) {
+      throw new Error('Пустой файл (0 байт) не поддерживается');
+    }
+
     const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
     let uploadedBytes = 0;
     const startTime = Date.now();
@@ -319,14 +378,8 @@ class ApiClient {
   }
 
   public async downloadFile(fileId: string, fileName: string): Promise<void> {
-    const headers = new Headers();
-    if (this.accessToken) {
-      headers.set('Authorization', `Bearer ${this.accessToken}`);
-    }
-
-    const response = await fetch(this.resolveUrl(`/api/download?id=${encodeURIComponent(fileId)}`), {
+    const response = await this.fetchWithAuth(`/api/download?id=${encodeURIComponent(fileId)}`, {
       method: 'GET',
-      headers,
     });
 
     if (!response.ok) {

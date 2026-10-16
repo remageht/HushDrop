@@ -84,6 +84,15 @@ func SanitizeFilename(rawName string) string {
 	clean = strings.ReplaceAll(clean, "..", "")
 	clean = strings.ReplaceAll(clean, "/", "")
 	clean = strings.ReplaceAll(clean, "\\", "")
+	// Strip control characters (CR/LF/TAB etc.) to prevent header injection
+	clean = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, clean)
+	// ':' is invalid for filenames on NTFS (alternate data streams)
+	clean = strings.ReplaceAll(clean, ":", "_")
 	clean = strings.TrimSpace(clean)
 
 	if clean == "" || clean == "." {
@@ -107,8 +116,15 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if totalSize > m.maxFileSize {
-		return nil, fmt.Errorf("file size %d bytes exceeds max allowed %d bytes", totalSize, m.maxFileSize)
+	if totalSize <= 0 || totalSize > m.maxFileSize {
+		return nil, fmt.Errorf("invalid declared file size %d: must be between 1 and %d bytes", totalSize, m.maxFileSize)
+	}
+
+	// Chunk count must correspond exactly to the declared size at max chunk granularity,
+	// otherwise a client could pad the file far beyond the declared limits.
+	expectedChunks := (totalSize + m.maxChunkSize - 1) / m.maxChunkSize
+	if int64(totalChunks) != expectedChunks {
+		return nil, fmt.Errorf("chunk count mismatch: declared %d bytes needs exactly %d chunks, got %d", totalSize, expectedChunks, totalChunks)
 	}
 
 	cleanName := SanitizeFilename(rawName)
@@ -163,13 +179,32 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 		return nil, fmt.Errorf("chunk size %d exceeds limit of %d bytes", chunkSize, m.maxChunkSize)
 	}
 
+	if chunkIndex < 0 {
+		return nil, fmt.Errorf("invalid chunk index %d", chunkIndex)
+	}
+
 	m.mu.Lock()
 	meta, exists := m.files[fileID]
 	if !exists {
 		m.mu.Unlock()
 		return nil, errors.New("upload session not initialized")
 	}
+	if chunkIndex >= meta.TotalChunks {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("chunk index %d out of range (total chunks %d)", chunkIndex, meta.TotalChunks)
+	}
+	offset := int64(chunkIndex) * m.maxChunkSize
+	if offset < 0 || offset >= meta.Size {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("chunk offset %d beyond declared file size %d", offset, meta.Size)
+	}
 	tracker := m.chunkTracker[fileID]
+	if meta.IsCompleted {
+		// Upload already finalized: acknowledge idempotently without rewriting the file
+		snapshot := *meta
+		m.mu.Unlock()
+		return &snapshot, nil
+	}
 	m.mu.Unlock()
 
 	// Open temp file for writing at calculated offset
@@ -178,7 +213,6 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 		return nil, fmt.Errorf("failed to open temp file for chunk: %w", err)
 	}
 
-	offset := int64(chunkIndex) * m.maxChunkSize
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("failed to seek offset in temp file: %w", err)
@@ -191,9 +225,18 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 	if err != nil {
 		return nil, fmt.Errorf("failed to write chunk to disk: %w", err)
 	}
+	if chunkSize >= 0 && written != chunkSize {
+		return nil, fmt.Errorf("incomplete chunk write: %d of %d bytes received", written, chunkSize)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Re-check completion under lock: a concurrent request may have finalized already
+	if meta.IsCompleted {
+		snapshot := *meta
+		return &snapshot, nil
+	}
 
 	if !tracker[chunkIndex] {
 		tracker[chunkIndex] = true
@@ -207,8 +250,9 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 		}
 	}
 
-	_ = written
-	return meta, nil
+	// Return a snapshot copy: callers must not read shared state outside the lock
+	snapshot := *meta
+	return &snapshot, nil
 }
 
 func (m *Manager) finalizeUploadLocked(meta *FileMetadata, tracker map[int]bool) error {
@@ -275,7 +319,8 @@ func (m *Manager) GetFile(fileID string) (*FileMetadata, error) {
 	if !exists || !meta.IsCompleted {
 		return nil, errors.New("file not found or incomplete")
 	}
-	return meta, nil
+	copyMeta := *meta
+	return &copyMeta, nil
 }
 
 // ClearAll deletes all stored files and temporary chunks from disk ("Забыть всё")

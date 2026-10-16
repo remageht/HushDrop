@@ -28,6 +28,7 @@ type Server struct {
 	nearbyScanner    *discovery.Scanner
 	scanMu           sync.Mutex
 	scanCooldowns    map[string]time.Time
+	scanActive       bool
 	httpServer       *http.Server
 	certHTTPServer   *http.Server
 }
@@ -83,11 +84,13 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	staticHandler := &spaHandler{staticFS: getFileSystem()}
 	mux.Handle("/", staticHandler)
 
-	// Wrap middleware chain: Recovery -> LAN Filter -> Rate Limit -> Auth -> Mux
+	// Wrap middleware chain: Recovery -> Security Headers -> LAN Filter -> Rate Limit -> Auth -> Mux
 	handler := s.recoveryMiddleware(
-		s.lanFilterMiddleware(
-			s.rateLimitMiddleware(
-				s.authMiddleware(mux),
+		s.securityHeadersMiddleware(
+			s.lanFilterMiddleware(
+				s.rateLimitMiddleware(
+					s.authMiddleware(mux),
+				),
 			),
 		),
 	)
@@ -99,13 +102,15 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	}
 
 	s.httpServer = &http.Server{
-		Addr:         cfg.Addr(),
-		Handler:      handler,
-		TLSConfig:    tlsConfig,
-		ErrorLog:     log.New(&tlsErrorFilterWriter{}, "", 0),
-		ReadTimeout:  15 * time.Minute, // Allow large chunked streams
-		WriteTimeout: 15 * time.Minute,
-		IdleTimeout:  60 * time.Second,
+		Addr:              cfg.Addr(),
+		Handler:           handler,
+		TLSConfig:         tlsConfig,
+		ErrorLog:          log.New(&tlsErrorFilterWriter{}, "", 0),
+		ReadHeaderTimeout: 10 * time.Second, // Slowloris protection
+		MaxHeaderBytes:    64 << 10,
+		ReadTimeout:       15 * time.Minute, // Allow large chunked streams
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Plain HTTP helper server for certificate installation and friendly redirect
@@ -121,11 +126,13 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 		)
 
 		s.certHTTPServer = &http.Server{
-			Addr:         cfg.HTTPAddr(),
-			Handler:      certHandler,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			IdleTimeout:  30 * time.Second,
+			Addr:              cfg.HTTPAddr(),
+			Handler:           certHandler,
+			ReadHeaderTimeout: 5 * time.Second,
+			MaxHeaderBytes:    32 << 10,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       30 * time.Second,
 		}
 	}
 

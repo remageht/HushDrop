@@ -19,6 +19,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (targetHost) {
       apiClient.setServerBaseUrl(targetHost);
     }
@@ -31,21 +33,39 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, 
     if (paramToken) setToken(paramToken);
     if (paramFp) setUrlFp(paramFp);
 
+    // Strip pairing secrets from the address bar and browser history
+    if (paramToken || paramFp) {
+      params.delete('token');
+      params.delete('fp');
+      const rest = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`
+      );
+    }
+
     // Fetch pair info from server to verify availability
     apiClient
       .getPairInfo()
       .then((info) => {
+        if (cancelled) return;
         setServerInfo(info);
         if (!paramToken && info.token) {
           setToken(info.token);
         }
       })
       .catch((err) => {
+        if (cancelled) return;
         setErrorMessage(err.message || 'Не удалось подключиться к узлу');
       })
       .finally(() => {
-        setIsFetchingInfo(false);
+        if (!cancelled) setIsFetchingInfo(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [targetHost]);
 
   const handleSubmit = async (e: React.FormEvent) => {

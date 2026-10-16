@@ -16,8 +16,6 @@ struct PairingInfo {
 
 struct AppState {
     go_child: Arc<Mutex<Option<Child>>>,
-    server_base_url: String,
-    http_client: reqwest::blocking::Client,
     pairing_info: Arc<Mutex<PairingInfo>>,
 }
 
@@ -176,10 +174,48 @@ fn open_downloads_folder() {
     }
 }
 
-/// Revokes all active sessions on the server.
-fn revoke_sessions(client: &reqwest::blocking::Client, server_url: &str) {
-    let revoke_url = format!("{}/api/revoke", server_url);
-    let _ = client.post(&revoke_url).send();
+/// Escapes a string for safe interpolation into HTML text/attribute context.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Escapes a string for safe interpolation into a single-quoted JS string literal.
+fn js_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('<', "\\u003C")
+        .replace('>', "\\u003E")
+        .replace('&', "\\u0026")
+}
+
+/// Revokes all active sessions via the authenticated webview context
+/// (the server only accepts /api/revoke behind a Bearer token).
+fn revoke_all_via_webview(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let js = r#"(async function () {
+        try {
+            var at = sessionStorage.getItem('hushdrop_access_token');
+            var rf = sessionStorage.getItem('hushdrop_refresh_token');
+            var revoke = function (t) { return fetch('/api/revoke', { method: 'POST', headers: t ? { Authorization: 'Bearer ' + t } : {} }); };
+            var resp = await revoke(at);
+            if (resp.status === 401 && rf) {
+                var rr = await fetch('/api/pair/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: rf }) });
+                if (rr.ok) { var d = await rr.json(); await revoke(d.accessToken); }
+            }
+        } catch (e) {}
+        try { sessionStorage.removeItem('hushdrop_access_token'); sessionStorage.removeItem('hushdrop_refresh_token'); } catch (e) {}
+        window.location.reload();
+    })();"#;
+    let _ = window.eval(js);
 }
 
 /// Displays the pairing QR and PIN window.
@@ -190,10 +226,14 @@ fn open_qr_window(app: &AppHandle, pairing_info: &Arc<Mutex<PairingInfo>>) {
         return;
     }
 
-    let (pin, fp, url) = {
+    let (pin_raw, fp_raw, url_raw) = {
         let info = pairing_info.lock().unwrap();
         (info.pin.clone(), info.fp.clone(), info.url.clone())
     };
+    let pin = html_escape(&pin_raw);
+    let fp = html_escape(&fp_raw);
+    let url_js = js_escape(&url_raw);
+    let fp_js = js_escape(&fp_raw);
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -300,7 +340,7 @@ fn open_qr_window(app: &AppHandle, pairing_info: &Arc<Mutex<PairingInfo>>) {
   </script>
 </body>
 </html>"#,
-        pin, fp, fp, url
+        pin, fp_js, fp, url_js
     );
 
     let encoded = utf8_percent_encode(&html, NON_ALPHANUMERIC).to_string();
@@ -341,8 +381,6 @@ pub fn run() {
 
     let state = AppState {
         go_child: go_child_holder.clone(),
-        server_base_url: server_url.clone(),
-        http_client: http_client.clone(),
         pairing_info: pairing_info.clone(),
     };
 
@@ -401,13 +439,10 @@ pub fn run() {
                             open_downloads_folder();
                         }
                         "forget_all" => {
-                            revoke_sessions(&state.http_client, &state.server_base_url);
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.eval("window.location.reload()");
-                            }
+                            revoke_all_via_webview(app);
                         }
                         "quit" => {
-                            revoke_sessions(&state.http_client, &state.server_base_url);
+                            // Sessions live only in server RAM and die with the process
                             stop_go_backend(&state.go_child);
                             app.exit(0);
                         }

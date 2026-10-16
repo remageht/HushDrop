@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hushdrop-v1';
+const CACHE_NAME = 'hushdrop-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -31,7 +31,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   const url = new URL(event.request.url);
+
+  // Never intercept cross-origin requests (other HushDrop nodes in the LAN)
+  if (url.origin !== self.location.origin) {
+    return;
+  }
 
   // NEVER cache API requests, chunk transfers, or health checks
   if (url.pathname.startsWith('/api/') || url.pathname === '/health') {

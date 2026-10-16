@@ -48,6 +48,7 @@ class HushDropServer(
     private val isRunning = AtomicBoolean(false)
     private val threadPool = Executors.newCachedThreadPool()
     private val scanCooldowns = ConcurrentHashMap<String, Long>()
+    private val scanInProgress = AtomicBoolean(false)
 
     private var httpsServerSocket: SSLServerSocket? = null
     private var httpServerSocket: ServerSocket? = null
@@ -57,6 +58,11 @@ class HushDropServer(
     private var clipboardUpdatedAt: Long = 0L
 
     companion object {
+        const val MAX_PAIR_BODY = 64 * 1024
+        const val MAX_CLIPBOARD_BODY = 2 * 1024 * 1024
+        const val MAX_LINE_LENGTH = 8 * 1024
+        const val MAX_HEADER_COUNT = 100
+
         fun maskIp(ip: String): String {
             val parts = ip.split(".")
             return if (parts.size == 4) {
@@ -112,9 +118,15 @@ class HushDropServer(
 
         // 1. Start HTTPS on 8443
         threadPool.execute {
-            try {
-                val ssf = tlsBundle.sslContext.serverSocketFactory
+        try {
+            val ssf = tlsBundle.sslContext.serverSocketFactory
                 val server = ssf.createServerSocket(httpsPort) as SSLServerSocket
+                // Disable legacy TLS (1.0/1.1); keep 1.3 with 1.2 as a fallback for older devices
+                try {
+                    val supported = server.supportedProtocols.toSet()
+                    val allowed = listOf("TLSv1.3", "TLSv1.2").filter { supported.contains(it) }
+                    if (allowed.isNotEmpty()) server.enabledProtocols = allowed.toTypedArray()
+                } catch (_: Exception) {}
                 httpsServerSocket = server
                 Log.i(tag, "HTTPS Server listening on port $httpsPort")
 
@@ -197,9 +209,11 @@ class HushDropServer(
             val queryString = if (fullPath.contains("?")) fullPath.substringAfter("?") else ""
 
             val headers = mutableMapOf<String, String>()
-            while (true) {
+            var headerCount = 0
+            while (headerCount < MAX_HEADER_COUNT) {
                 val line = readLine(input) ?: break
                 if (line.isEmpty()) break
+                headerCount++
                 val colonIdx = line.indexOf(':')
                 if (colonIdx > 0) {
                     val key = line.substring(0, colonIdx).trim().lowercase()
@@ -244,7 +258,8 @@ class HushDropServer(
             var sessionToken = ""
             if (!isPublic && path.startsWith("/api/")) {
                 val authHeader = headers["authorization"]
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                // Bearer scheme is case-insensitive per RFC 6750
+                if (authHeader == null || !authHeader.startsWith("Bearer ", ignoreCase = true)) {
                     sendResponse(
                         output, 401, "Unauthorized", "application/json",
                         "{\"error\":\"Unauthorized: missing bearer token\"}"
@@ -253,7 +268,7 @@ class HushDropServer(
                     socket.close()
                     return
                 }
-                val token = authHeader.removePrefix("Bearer ").trim()
+                val token = authHeader.substring(7).trim()
                 val session = pairManager.validateSession(token)
                 if (session == null) {
                     sendResponse(
@@ -330,7 +345,13 @@ class HushDropServer(
             return
         }
 
-        val bodyStr = readBodyString(input, headers["content-length"]?.toIntOrNull() ?: 0)
+        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+        if (contentLength > MAX_PAIR_BODY) {
+            sendResponse(out, 413, "Payload Too Large", "application/json", "{\"error\":\"Request body too large\"}")
+            return
+        }
+
+        val bodyStr = readBodyString(input, contentLength)
         val bodyJson = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
 
         val pin = bodyJson.optString("pin", "")
@@ -362,7 +383,13 @@ class HushDropServer(
     }
 
     private fun handleRefresh(input: InputStream, out: OutputStream, headers: Map<String, String>, clientIp: String) {
-        val bodyStr = readBodyString(input, headers["content-length"]?.toIntOrNull() ?: 0)
+        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+        if (contentLength > MAX_PAIR_BODY) {
+            sendResponse(out, 413, "Payload Too Large", "application/json", "{\"error\":\"Request body too large\"}")
+            return
+        }
+
+        val bodyStr = readBodyString(input, contentLength)
         val bodyJson = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
         val refreshToken = bodyJson.optString("refreshToken", "")
 
@@ -512,18 +539,48 @@ class HushDropServer(
         sessionToken: String
     ) {
         val now = System.currentTimeMillis()
-        val lastScan = scanCooldowns[sessionToken] ?: 0L
-        val elapsed = now - lastScan
-        if (elapsed < 15_000L) {
-            val remaining = ((15_000L - elapsed + 999L) / 1000L).toInt().coerceAtLeast(1)
+
+        // Cooldown check-and-set atomically per session token
+        val prev = scanCooldowns.putIfAbsent(sessionToken, now)
+        if (prev != null) {
+            val elapsed = now - prev
+            if (elapsed < 15_000L) {
+                val remaining = ((15_000L - elapsed + 999L) / 1000L).toInt().coerceAtLeast(1)
+                sendResponse(
+                    out, 429, "Too Many Requests", "application/json",
+                    "{\"error\":\"Scan rate limit exceeded. Please wait $remaining seconds.\"}",
+                    listOf("Retry-After: $remaining")
+                )
+                return
+            }
+            scanCooldowns[sessionToken] = now
+        }
+
+        // Drop stale cooldown entries so the map cannot grow unbounded
+        scanCooldowns.entries.removeIf { now - it.value > 60_000L }
+
+        // Only one scan at a time
+        if (!scanInProgress.compareAndSet(false, true)) {
             sendResponse(
                 out, 429, "Too Many Requests", "application/json",
-                "{\"error\":\"Scan rate limit exceeded. Please wait $remaining seconds.\"}",
-                listOf("Retry-After: $remaining")
+                "{\"error\":\"Another scan is already in progress. Please wait a few seconds.\"}",
+                listOf("Retry-After: 2")
             )
             return
         }
-        scanCooldowns[sessionToken] = now
+        try {
+            handleNearbyScanLocked(input, out, headers, clientIp)
+        } finally {
+            scanInProgress.set(false)
+        }
+    }
+
+    private fun handleNearbyScanLocked(
+        input: InputStream,
+        out: OutputStream,
+        headers: Map<String, String>,
+        clientIp: String
+    ) {
 
         val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
         val customPorts = mutableListOf<Int>()
@@ -690,10 +747,25 @@ class HushDropServer(
         val chunkIndex = chunkIdxStr.toIntOrNull() ?: -1
         val totalChunks = totalChunksStr.toIntOrNull() ?: -1
         val fileSize = fileSizeStr.toLongOrNull() ?: 0L
-        val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
+        val contentLength = headers["content-length"]?.toLongOrNull() ?: -1L
 
-        if (chunkIndex < 0 || totalChunks <= 0) {
+        // Chunked transfer encoding is not supported: a declared body size is required
+        if (contentLength < 0) {
+            val resp = JSONObject().apply {
+                put("error", "Content-Length header is required (chunked encoding is not supported)")
+            }
+            sendResponse(out, 411, "Length Required", "application/json", resp.toString())
+            return
+        }
+
+        if (chunkIndex < 0 || totalChunks <= 0 || chunkIndex >= totalChunks) {
             val resp = JSONObject().apply { put("error", "Invalid chunk index or total chunks") }
+            sendResponse(out, 400, "Bad Request", "application/json", resp.toString())
+            return
+        }
+
+        if (fileSize <= 0) {
+            val resp = JSONObject().apply { put("error", "Invalid or missing X-File-Size header") }
             sendResponse(out, 400, "Bad Request", "application/json", resp.toString())
             return
         }
@@ -780,7 +852,11 @@ class HushDropServer(
         val fileLength = file.length()
         val rangeHeader = headers["range"]
 
-        val safeFilename = meta.cleanName.replace("\"", "_")
+        // Strip CR/LF/quotes defensively against header injection
+        val safeFilename = meta.cleanName
+            .replace("\"", "_")
+            .replace("\r", "_")
+            .replace("\n", "_")
         val securityWarningHeader = if (meta.isDangerous) "X-Security-Warning: Potentially executable file\r\n" else ""
 
         if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
@@ -793,12 +869,29 @@ class HushDropServer(
             if (dashIdx != -1) {
                 val startPart = rangeVal.substring(0, dashIdx).trim()
                 val endPart = rangeVal.substring(dashIdx + 1).trim()
-                if (startPart.isNotEmpty()) start = startPart.toLongOrNull() ?: 0L
-                if (endPart.isNotEmpty()) end = endPart.toLongOrNull() ?: (fileLength - 1L)
+                if (startPart.isEmpty()) {
+                    // Suffix range: "bytes=-N" means the last N bytes
+                    val suffixLen = endPart.toLongOrNull() ?: 0L
+                    start = maxOf(0L, fileLength - suffixLen)
+                    end = fileLength - 1L
+                } else {
+                    start = startPart.toLongOrNull() ?: -1L
+                    if (endPart.isNotEmpty()) end = endPart.toLongOrNull() ?: (fileLength - 1L)
+                }
             }
 
             start = maxOf(0L, start)
             end = minOf(fileLength - 1L, end)
+
+            if (start > end || start < 0 || fileLength == 0L) {
+                val resp = "HTTP/1.1 416 Range Not Satisfiable\r\n" +
+                        "Content-Range: bytes */$fileLength\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(resp.toByteArray(StandardCharsets.UTF_8))
+                return
+            }
+
             val rangeLength = end - start + 1L
 
             val responseHeaders = "HTTP/1.1 206 Partial Content\r\n" +
@@ -862,6 +955,11 @@ class HushDropServer(
 
     private fun handleHttpHelperLanding(out: OutputStream, host: String) {
         val cleanHost = host.substringBefore(":")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#39;")
         val httpsUrl = "https://$cleanHost:$httpsPort/"
 
         val html = """
@@ -943,6 +1041,10 @@ class HushDropServer(
                 val bytes = baos.toByteArray()
                 return String(bytes, 0, bytes.size - 1, StandardCharsets.UTF_8)
             }
+            if (baos.size() > MAX_LINE_LENGTH) {
+                // Header abuse / malformed request: refuse to buffer further
+                return null
+            }
             baos.write(b)
             prev = b
         }
@@ -951,10 +1053,12 @@ class HushDropServer(
 
     private fun readBodyString(input: InputStream, length: Int): String {
         if (length <= 0) return ""
-        val bytes = ByteArray(length)
+        // Hard cap on allocation regardless of the declared Content-Length
+        val capped = minOf(length, MAX_CLIPBOARD_BODY)
+        val bytes = ByteArray(capped)
         var totalRead = 0
-        while (totalRead < length) {
-            val r = input.read(bytes, totalRead, length - totalRead)
+        while (totalRead < capped) {
+            val r = input.read(bytes, totalRead, capped - totalRead)
             if (r == -1) break
             totalRead += r
         }

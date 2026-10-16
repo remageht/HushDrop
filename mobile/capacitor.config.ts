@@ -47,7 +47,9 @@ const config: CapacitorConfig = {
     backgroundColor: '#0b0f19',
     allowMixedContent: true,
     captureInput: true,
-    webContentsDebuggingEnabled: true
+    // Keep WebView remote debugging disabled in sideload builds: session
+    // tokens live in sessionStorage and would be readable over adb.
+    webContentsDebuggingEnabled: false
   }
 };
 

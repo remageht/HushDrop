@@ -65,6 +65,8 @@ class TransferManager(
                 .replace("..", "")
                 .replace("/", "")
                 .replace("\\", "")
+                // Strip control characters (CR/LF/TAB etc.) to prevent header injection
+                .filter { it.code >= 0x20 && it.code != 0x7F }
                 .trim()
             return if (cleaned.isEmpty() || cleaned == ".") "unnamed_file" else cleaned
         }
@@ -97,8 +99,14 @@ class TransferManager(
             throw IllegalArgumentException("invalid file id: must be alphanumeric and between 4 and 64 characters")
         }
 
-        if (totalSize > maxFileSize) {
-            throw IllegalArgumentException("file size $totalSize exceeds max allowed $maxFileSize bytes")
+        if (totalSize <= 0 || totalSize > maxFileSize) {
+            throw IllegalArgumentException("invalid declared file size $totalSize: must be between 1 and $maxFileSize bytes")
+        }
+
+        // Chunk count must correspond exactly to the declared size at max chunk granularity
+        val expectedChunks = ((totalSize + maxChunkSize - 1) / maxChunkSize).toInt()
+        if (totalChunks != expectedChunks) {
+            throw IllegalArgumentException("chunk count mismatch: declared $totalSize bytes needs exactly $expectedChunks chunks, got $totalChunks")
         }
 
         val cleanName = sanitizeFilename(rawName)
@@ -157,7 +165,16 @@ class TransferManager(
         val meta = files[fileId] ?: throw IllegalArgumentException("upload session not initialized")
         val tempFile = meta.tempFilePath ?: throw IllegalStateException("temp file missing")
 
+        if (chunkIndex < 0 || chunkIndex >= meta.totalChunks) {
+            throw IllegalArgumentException("chunk index $chunkIndex out of range (total chunks ${meta.totalChunks})")
+        }
         val offset = chunkIndex.toLong() * maxChunkSize
+        if (offset < 0 || offset >= meta.size) {
+            throw IllegalArgumentException("chunk offset $offset beyond declared file size ${meta.size}")
+        }
+
+        // Idempotently acknowledge retried chunks after finalization without rewriting the file
+        lock.read { if (meta.isCompleted) return meta.copy() }
 
         // Stream chunk into temp file at calculated offset using 64KB buffer
         RandomAccessFile(tempFile, "rw").use { raf ->
@@ -173,7 +190,10 @@ class TransferManager(
             }
         }
 
-        lock.write {
+        return lock.write {
+            // Re-check under lock: a concurrent request may have finalized already
+            if (meta.isCompleted) return@write meta.copy()
+
             val tracker = chunkTrackers.getOrPut(fileId) { mutableSetOf() }
             if (tracker.add(chunkIndex)) {
                 meta.uploadedChunks = tracker.size
@@ -182,9 +202,9 @@ class TransferManager(
             if (meta.uploadedChunks >= meta.totalChunks) {
                 finalizeUpload(meta, tracker)
             }
-        }
 
-        return meta
+            meta.copy()
+        }
     }
 
     private fun finalizeUpload(meta: HostFileMetadata, tracker: Set<Int>) {

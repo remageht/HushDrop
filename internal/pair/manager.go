@@ -26,6 +26,7 @@ type Session struct {
 type IPAttemptTracker struct {
 	FailedAttempts int
 	BannedUntil    time.Time
+	LastSeen       time.Time
 }
 
 type Manager struct {
@@ -105,9 +106,11 @@ func (m *Manager) recordFailedAttemptLocked(ip string) {
 		m.ipAttempts[ip] = tracker
 	}
 
+	now := time.Now()
+	tracker.LastSeen = now
 	tracker.FailedAttempts++
 	if tracker.FailedAttempts >= 5 {
-		tracker.BannedUntil = time.Now().Add(5 * time.Minute)
+		tracker.BannedUntil = now.Add(5 * time.Minute)
 		tracker.FailedAttempts = 0
 	}
 }
@@ -128,14 +131,15 @@ func (m *Manager) ClearFailedAttempts(ip string) {
 
 // VerifyPairing validates PIN and one-time token, performing X25519 key exchange if client public key is provided
 func (m *Manager) VerifyPairing(ip string, submittedPIN string, submittedToken string, clientPubKeyHex string) (*Session, string, error) {
-	if err := m.CheckIPBan(ip); err != nil {
-		return nil, "", err
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
+
+	// Re-check ban under the write lock to avoid TOCTOU with concurrent attempts
+	if tracker, exists := m.ipAttempts[ip]; exists && now.Before(tracker.BannedUntil) {
+		return nil, "", fmt.Errorf("ip banned due to repeated failed attempts, try again in %v", time.Until(tracker.BannedUntil).Round(time.Second))
+	}
 
 	// Check expiration
 	if now.After(m.pinExpiresAt) || now.After(m.tokenExpiresAt) {
@@ -268,10 +272,10 @@ func (m *Manager) RefreshSession(oldRefreshToken string, clientIP string) (*Sess
 
 // ValidateSession verifies if an access token is valid and active
 func (m *Manager) ValidateSession(accessToken string) (*Session, bool) {
-	m.mu.RLock()
-	session, exists := m.sessions[accessToken]
-	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
+	session, exists := m.sessions[accessToken]
 	if !exists {
 		return nil, false
 	}
@@ -283,17 +287,13 @@ func (m *Manager) ValidateSession(accessToken string) (*Session, bool) {
 
 	// Check inactivity
 	if now.Sub(session.LastActivity) > m.inactivityTTL {
-		m.mu.Lock()
 		delete(m.sessions, accessToken)
 		delete(m.refreshIndex, session.RefreshToken)
-		m.mu.Unlock()
 		return nil, false
 	}
 
-	// Touch last activity
-	m.mu.Lock()
+	// Touch last activity (under the same lock to avoid data races)
 	session.LastActivity = now
-	m.mu.Unlock()
 
 	return session, true
 }
@@ -341,9 +341,9 @@ func (m *Manager) startSweeper() {
 			}
 		}
 
-		// Clean up old bans
+		// Clean up stale attempt trackers: bans that expired and IPs idle for 15+ minutes
 		for ip, tracker := range m.ipAttempts {
-			if now.After(tracker.BannedUntil) && tracker.FailedAttempts == 0 {
+			if now.After(tracker.BannedUntil) && now.Sub(tracker.LastSeen) > 15*time.Minute {
 				delete(m.ipAttempts, ip)
 			}
 		}
