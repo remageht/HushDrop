@@ -22,7 +22,7 @@ class NsdHelper(private val context: Context) {
                 this.port = port
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     setAttribute("fp", fingerprint)
-                    setAttribute("v", "0.3.8")
+                    setAttribute("v", "0.3.9")
                 }
             }
 

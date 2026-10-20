@@ -144,8 +144,8 @@ func TestLiveTwoNodesDiscovery(t *testing.T) {
 	for _, n := range discoveredBy1 {
 		if n.Port == 8444 {
 			foundNode2 = true
-			if n.Version != "0.3.8" {
-				t.Errorf("expected Node 2 version 0.3.8, got %s", n.Version)
+			if n.Version != "0.3.9" {
+				t.Errorf("expected Node 2 version 0.3.9, got %s", n.Version)
 			}
 			if n.LatencyMs <= 0 {
 				t.Errorf("expected positive latency, got %d", n.LatencyMs)
@@ -206,8 +206,8 @@ func TestLiveTwoNodesDiscovery(t *testing.T) {
 	for _, n := range discoveredBy2 {
 		if n.Port == 8443 {
 			foundNode1 = true
-			if n.Version != "0.3.8" {
-				t.Errorf("expected Node 1 version 0.3.8, got %s", n.Version)
+			if n.Version != "0.3.9" {
+				t.Errorf("expected Node 1 version 0.3.9, got %s", n.Version)
 			}
 		}
 		if n.Port == 8444 {

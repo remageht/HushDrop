@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-10-16
+
+### Fixed
+- **Desktop hardening**: Tauri capabilities restricted to the main window, strict CSP config, CWD removed from the Go-binary lookup (binary planting), PIN masked in console output.
+- **Android hardening**: pairing PIN removed from the foreground notification, canonical path containment with a directory-separator boundary for shared-file plugin reads, bounded worker pool, atomic PIN attempt counter, chunk-completeness check, TOCTOU guard on upload finalization, mDNS version sync.
+- **Go core**: empty chunks rejected (411), TOCTOU guard on chunk finalization after session revoke, idempotent init for completed uploads, masked file IDs in error logs, cached SPA file server.
+- **PWA**: server URL no longer persisted to localStorage, fingerprint cleared together with the session, health status validation, active transfers aborted on list clear, clipboard rejection handled.
+
+### Changed
+- Bumped unified project version to `0.3.9` (Android `versionCode 39`).
+
+---
+
 ## [0.3.8] - 2026-10-16
 
 ### Fixed

@@ -317,7 +317,7 @@ class HushDropServer(
         val json = JSONObject().apply {
             put("status", "ok")
             put("service", "HushDrop")
-            put("version", "0.3.8")
+            put("version", "0.3.9")
             put("timestamp", System.currentTimeMillis() / 1000L)
         }
         sendResponse(out, 200, "OK", "application/json", json.toString())
