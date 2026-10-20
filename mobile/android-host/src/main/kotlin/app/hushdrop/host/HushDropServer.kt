@@ -46,7 +46,7 @@ class HushDropServer(
 ) {
     private val tag = "HushDropServer"
     private val isRunning = AtomicBoolean(false)
-    private val threadPool = Executors.newCachedThreadPool()
+    private val threadPool = Executors.newFixedThreadPool(32)
     private val scanCooldowns = ConcurrentHashMap<String, Long>()
     private val scanInProgress = AtomicBoolean(false)
 
@@ -750,9 +750,9 @@ class HushDropServer(
         val contentLength = headers["content-length"]?.toLongOrNull() ?: -1L
 
         // Chunked transfer encoding is not supported: a declared body size is required
-        if (contentLength < 0) {
+        if (contentLength <= 0) {
             val resp = JSONObject().apply {
-                put("error", "Content-Length header is required (chunked encoding is not supported)")
+                put("error", "Chunk body must not be empty and Content-Length is required")
             }
             sendResponse(out, 411, "Length Required", "application/json", resp.toString())
             return

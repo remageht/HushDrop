@@ -25,7 +25,7 @@ class ApiClient {
     this.accessToken = sessionStorage.getItem('hushdrop_access_token');
     this.refreshToken = sessionStorage.getItem('hushdrop_refresh_token');
     this.fingerprint = sessionStorage.getItem('hushdrop_fingerprint');
-    this.serverBaseUrl = sessionStorage.getItem('hushdrop_server_url') || localStorage.getItem('hushdrop_server_url') || '';
+    this.serverBaseUrl = sessionStorage.getItem('hushdrop_server_url') || '';
   }
 
   public setServerBaseUrl(url: string) {
@@ -36,7 +36,7 @@ class ApiClient {
     }
     this.serverBaseUrl = normalized;
     sessionStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
-    localStorage.setItem('hushdrop_server_url', this.serverBaseUrl);
+    localStorage.removeItem('hushdrop_server_url');
   }
 
   public getServerBaseUrl(): string {
@@ -84,8 +84,10 @@ class ApiClient {
   public clearSession() {
     this.accessToken = null;
     this.refreshToken = null;
+    this.fingerprint = null;
     sessionStorage.removeItem('hushdrop_access_token');
     sessionStorage.removeItem('hushdrop_refresh_token');
+    sessionStorage.removeItem('hushdrop_fingerprint');
     this.notifyAuthChange();
   }
 
@@ -224,6 +226,9 @@ class ApiClient {
   // API Methods
   public async getHealth(): Promise<{ status: string; version: string }> {
     const resp = await fetch(this.resolveUrl('/health'));
+    if (!resp.ok) {
+      throw new Error(`Ошибка проверки состояния узла (${resp.status})`);
+    }
     return resp.json();
   }
 

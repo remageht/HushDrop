@@ -116,6 +116,10 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if existing, exists := m.files[fileID]; exists && existing.IsCompleted {
+		snapshot := *existing
+		return &snapshot, nil
+	}
 	if totalSize <= 0 || totalSize > m.maxFileSize {
 		return nil, fmt.Errorf("invalid declared file size %d: must be between 1 and %d bytes", totalSize, m.maxFileSize)
 	}
@@ -175,7 +179,7 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 
 // WriteChunk streams a chunk directly to disk at the calculated offset without loading it into RAM
 func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chunkReader io.Reader) (*FileMetadata, error) {
-	if chunkSize > m.maxChunkSize {
+	if chunkSize <= 0 || chunkSize > m.maxChunkSize {
 		return nil, fmt.Errorf("chunk size %d exceeds limit of %d bytes", chunkSize, m.maxChunkSize)
 	}
 
@@ -231,6 +235,11 @@ func (m *Manager) WriteChunk(fileID string, chunkIndex int, chunkSize int64, chu
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	currentMeta, exists := m.files[fileID]
+	if !exists || currentMeta != meta {
+		return nil, errors.New("upload session expired or revoked")
+	}
 
 	// Re-check completion under lock: a concurrent request may have finalized already
 	if meta.IsCompleted {

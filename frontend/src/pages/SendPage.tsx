@@ -244,7 +244,11 @@ export const SendPage: React.FC = () => {
           </h4>
           {transfers.length > 0 && (
             <button
-              onClick={() => setTransfers([])}
+              onClick={() => {
+                transfers.forEach((t) => t.abortController?.abort());
+                activeKeysRef.current.clear();
+                setTransfers([]);
+              }}
               className="text-xs text-slate-500 hover:text-slate-400"
             >
               Очистить список

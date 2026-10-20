@@ -21,7 +21,8 @@ func getFileSystem() http.FileSystem {
 
 // spaHandler serves static assets and falls back to index.html for SPA routes
 type spaHandler struct {
-	staticFS http.FileSystem
+	staticFS   http.FileSystem
+	fileServer http.Handler
 }
 
 func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +34,7 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		stat, err := f.Stat()
 		if err == nil && !stat.IsDir() {
-			http.FileServer(h.staticFS).ServeHTTP(w, r)
+			h.fileServer.ServeHTTP(w, r)
 			return
 		}
 	}

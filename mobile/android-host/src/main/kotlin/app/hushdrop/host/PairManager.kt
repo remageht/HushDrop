@@ -4,6 +4,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -31,9 +32,9 @@ data class PairResult(
 )
 
 private data class IpBanTracker(
-    var failedAttempts: Int = 0,
-    var bannedUntil: Long = 0L,
-    var lastSeen: Long = 0L
+    val failedAttempts: AtomicInteger = AtomicInteger(0),
+    @Volatile var bannedUntil: Long = 0L,
+    @Volatile var lastSeen: Long = 0L
 )
 
 class PairManager(
@@ -122,10 +123,10 @@ class PairManager(
         val tracker = ipAttempts.getOrPut(ip) { IpBanTracker() }
         val now = System.currentTimeMillis()
         tracker.lastSeen = now
-        tracker.failedAttempts++
-        if (tracker.failedAttempts >= 5) {
+        val attempts = tracker.failedAttempts.incrementAndGet()
+        if (attempts >= 5) {
             tracker.bannedUntil = now + (5 * 60 * 1000L) // 5 minutes ban
-            tracker.failedAttempts = 0
+            tracker.failedAttempts.set(0)
         }
     }
 

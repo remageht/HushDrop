@@ -205,7 +205,7 @@ export const HostPage: React.FC = () => {
   };
 
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).then(() => {}).catch(() => {});
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2500);
   };

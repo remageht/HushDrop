@@ -81,7 +81,8 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	mux.HandleFunc("/api/cert", s.handleCertDownload)
 
 	// Embedded Static Frontend & SPA Fallback
-	staticHandler := &spaHandler{staticFS: getFileSystem()}
+	fsys := getFileSystem()
+	staticHandler := &spaHandler{staticFS: fsys, fileServer: http.FileServer(fsys)}
 	mux.Handle("/", staticHandler)
 
 	// Wrap middleware chain: Recovery -> Security Headers -> LAN Filter -> Rate Limit -> Auth -> Mux

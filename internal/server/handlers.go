@@ -395,9 +395,9 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 
 	// Chunked transfer encoding is not supported for uploads: a declared size is required
 	chunkSize := r.ContentLength
-	if chunkSize < 0 {
+	if chunkSize <= 0 {
 		respondJSON(w, http.StatusLengthRequired, map[string]string{
-			"error": "Content-Length header is required (chunked encoding is not supported)",
+			"error": "Chunk body must not be empty and Content-Length is required",
 		})
 		return
 	}
@@ -443,7 +443,11 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	// Stream chunk directly to disk
 	meta, err := s.transferManager.WriteChunk(fileID, chunkIdx, chunkSize, r.Body)
 	if err != nil {
-		log.Printf("[UPLOAD_CHUNK_ERR] FileID %s chunk %d: %v", fileID, chunkIdx, err)
+		uploadErrPrefix := fileID
+		if len(uploadErrPrefix) > 8 {
+			uploadErrPrefix = uploadErrPrefix[:8]
+		}
+		log.Printf("[UPLOAD_CHUNK_ERR] FileID %s chunk %d: %v", uploadErrPrefix, chunkIdx, err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to write chunk or finalize file",
 		})

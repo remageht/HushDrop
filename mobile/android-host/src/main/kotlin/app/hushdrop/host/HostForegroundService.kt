@@ -116,7 +116,7 @@ class HostForegroundService : Service() {
             // Satisfy startForegroundService contract on repeated calls
             try {
                 val (pin, _, _) = (activeServer?.pairManager ?: PairManager()).getActivePairingDetails()
-                val notification = buildNotification(hostIp, pin)
+                val notification = buildNotification(hostIp)
                 startForeground(NOTIFICATION_ID, notification)
             } catch (e: Exception) {
                 Log.w(tag, "Failed to refresh foreground notification: ${e.message}")
@@ -167,7 +167,7 @@ class HostForegroundService : Service() {
             val (pin, _, _) = pairMgr.getActivePairingDetails()
 
             // 6. Show Foreground Notification
-            val notification = buildNotification(hostIp, pin)
+            val notification = buildNotification(hostIp)
             startForeground(NOTIFICATION_ID, notification)
 
             isRunning = true
@@ -246,7 +246,7 @@ class HostForegroundService : Service() {
         }
     }
 
-    private fun buildNotification(ip: String, pin: String): Notification {
+    private fun buildNotification(ip: String): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = if (launchIntent != null) {
             PendingIntent.getActivity(
@@ -257,7 +257,7 @@ class HostForegroundService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("HushDrop Host активен")
-            .setContentText("https://$ip:8443 • PIN: $pin")
+            .setContentText("https://$ip:8443 • Защищено PIN")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

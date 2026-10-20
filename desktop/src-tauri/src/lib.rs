@@ -36,12 +36,12 @@ fn locate_go_binary() -> Option<PathBuf> {
     // 2. Cwd and relative dist
     #[cfg(target_os = "windows")]
     {
-        candidates.push(PathBuf::from("HushDrop.exe"));
+        // Safe relative candidates only in dist
         candidates.push(PathBuf::from("dist/HushDrop.exe"));
         candidates.push(PathBuf::from("../dist/HushDrop.exe"));
         candidates.push(PathBuf::from("../../dist/HushDrop.exe"));
     }
-    candidates.push(PathBuf::from("HushDrop-console.exe"));
+    // Only search dist for console fallback
     candidates.push(PathBuf::from("dist/HushDrop-console.exe"));
     candidates.push(PathBuf::from("../dist/HushDrop-console.exe"));
     candidates.push(PathBuf::from("../../dist/HushDrop-console.exe"));
@@ -89,7 +89,11 @@ fn start_go_backend(
 
             for line in reader.lines() {
                 if let Ok(l) = line {
-                    println!("{}", l);
+                    if l.contains("PIN для сопряжения:") {
+                        println!("🔑 PIN для сопряжения:          [PROTECTED]");
+                    } else {
+                        println!("{}", l);
+                    }
                     if l.contains("PIN для сопряжения:") {
                         if let Some(p) = l.split(':').nth(1) {
                             pin = p.split('(').next().unwrap_or("").trim().to_string();

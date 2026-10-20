@@ -101,6 +101,10 @@ class HushDropHostPlugin : Plugin() {
         }
 
         val file = File(path)
+        if (!isPathAllowed(file)) {
+            call.reject("Access denied: path outside allowed directories")
+            return
+        }
         if (!file.exists() || !file.canRead()) {
             call.reject("File does not exist or cannot be read at $path")
             return
@@ -200,6 +204,10 @@ class HushDropHostPlugin : Plugin() {
             return
         }
         val file = File(path)
+        if (!isPathAllowed(file)) {
+            call.reject("Access denied: path outside allowed directories")
+            return
+        }
         if (!file.exists() || !file.canRead()) {
             call.reject("File does not exist or cannot be read")
             return
@@ -214,6 +222,18 @@ class HushDropHostPlugin : Plugin() {
         } catch (e: Exception) {
             call.reject("Failed to read file: ${e.message}", e)
         }
+    }
+
+    private fun isPathAllowed(file: File): Boolean {
+        val canonical = try { file.canonicalPath } catch (_: Exception) { return false }
+        fun inside(base: String?): Boolean {
+            if (base.isNullOrEmpty()) return false
+            val withSeparator = if (base.endsWith(File.separator)) base else base + File.separator
+            return canonical == base || canonical.startsWith(withSeparator)
+        }
+        return inside(context.cacheDir.canonicalPath) ||
+                inside(context.filesDir.canonicalPath) ||
+                inside(context.getExternalFilesDir(null)?.canonicalPath)
     }
 
     companion object {

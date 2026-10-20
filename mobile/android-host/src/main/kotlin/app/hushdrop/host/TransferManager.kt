@@ -188,9 +188,16 @@ class TransferManager(
                 raf.write(buffer, 0, read)
                 totalRead += read
             }
+            if (chunkSize > 0 && totalRead != chunkSize) {
+                throw java.io.IOException("incomplete chunk write: $totalRead of $chunkSize bytes received")
+            }
         }
 
         return lock.write {
+            val current = files[fileId]
+            if (current == null || current !== meta) {
+                throw java.lang.IllegalStateException("upload session expired or revoked")
+            }
             // Re-check under lock: a concurrent request may have finalized already
             if (meta.isCompleted) return@write meta.copy()
 
