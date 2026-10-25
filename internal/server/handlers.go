@@ -448,8 +448,18 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 			uploadErrPrefix = uploadErrPrefix[:8]
 		}
 		log.Printf("[UPLOAD_CHUNK_ERR] FileID %s chunk %d: %v", uploadErrPrefix, chunkIdx, err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to write chunk or finalize file",
+		status := http.StatusInternalServerError
+		errMsg := "Failed to write chunk or finalize file"
+		errStr := err.Error()
+		if strings.Contains(errStr, "out of range") ||
+			strings.Contains(errStr, "not initialized") ||
+			strings.Contains(errStr, "invalid chunk") ||
+			strings.Contains(errStr, "beyond declared file size") {
+			status = http.StatusBadRequest
+			errMsg = errStr
+		}
+		respondJSON(w, status, map[string]string{
+			"error": errMsg,
 		})
 		return
 	}
