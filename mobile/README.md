@@ -67,6 +67,13 @@ cd android
 ./gradlew assembleDebug
 cd ..
 ```
+> **Java toolchain (Windows):** путь `java` на PATH может указывать на JRE 1.8 — Capacitor 6 требует JDK 17+.
+> Перед запуском gradlew выставьте JDK из Android Studio:
+> ```powershell
+> $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+> $env:Path = "$env:JAVA_HOME\bin;" + $env:Path
+> ```
+
 The compiled APK will be located at:
 `mobile/android/app/build/outputs/apk/debug/app-debug.apk`
 
