@@ -99,6 +99,23 @@ func main() {
 	}
 	transferManager := transfer.NewManagerWithEncryption(cfg.DownloadsDir, cfg.TempDir, cfg.MaxChunkSize, cfg.MaxFileSize, atRestKey)
 
+	// Create the server and open BOTH listeners eagerly — before any banner output.
+	// A failure here means the ports are taken (typically by another HushDrop
+	// instance): the user must see that immediately instead of a PIN/QR banner
+	// advertising an unreachable server (old 0.4.0 instance kept serving 8443
+	// while this one happily printed its QR on top of a failed bind).
+	srv := server.NewServer(cfg, tlsInfo, pairManager, transferManager)
+	if bindErr := srv.Bind(); bindErr != nil {
+		msg := fmt.Sprintf("Запуск невозможен: %v\n\nПорт занят другой программой — скорее всего, уже запущен второй экземпляр HushDrop.\nЗакройте его (именно так в системе останется жив только один узел) или запустите с другими портами: -port <число> / -http-port <число>.\n", bindErr)
+		fmt.Fprintln(os.Stderr, msg)
+		// GUI (windowsgui) builds have no console: leave diagnostics next to the data dir.
+		_ = os.WriteFile(filepath.Join(cfg.DataDir, "startup-error.txt"),
+			[]byte(time.Now().Format("[2006-01-02 15:04:05] ")+msg), 0600)
+		os.Exit(1)
+	}
+	// Successful start clears diagnostics that a previous failed run may have left.
+	_ = os.Remove(filepath.Join(cfg.DataDir, "startup-error.txt"))
+
 	// Format Pairing URL
 	portStr := fmt.Sprintf("%d", cfg.Port)
 	primaryURL := fmt.Sprintf("https://%s/?token=%s&fp=%s", net.JoinHostPort(primaryIP.String(), portStr), token, tlsInfo.Fingerprint)
@@ -136,9 +153,6 @@ func main() {
 		writePairingFile(cfg.DataDir, primaryURL, pin, tlsInfo.Fingerprint)
 		openBrowser(fmt.Sprintf("https://127.0.0.1:%s/", portStr))
 	}
-
-	// Create and start server
-	srv := server.NewServer(cfg, tlsInfo, pairManager, transferManager)
 
 	// Graceful shutdown channel
 	stopChan := make(chan os.Signal, 1)

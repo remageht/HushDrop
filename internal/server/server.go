@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -33,6 +35,10 @@ type Server struct {
 	scanActive       bool
 	httpServer       *http.Server
 	certHTTPServer   *http.Server
+	// Pre-bound sockets (see Bind). When set, Start() serves on them
+	// instead of binding lazily inside ListenAndServe.
+	tlsListener  net.Listener
+	httpListener net.Listener
 }
 
 // tlsErrorFilterWriter suppresses expected browser noise like EOF, bad/unknown cert, and aborts
@@ -147,17 +153,48 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	return s
 }
 
+// Bind pre-opens both TCP listeners (TLS main + plain HTTP helper) so that
+// a port conflict is reported synchronously. Without this, ListenAndServe
+// would only fail inside a background goroutine — after the banner with
+// PIN/QR has already been printed, misleading the user into scanning a
+// dead instance (see device-debug session of 2026-10-26).
+func (s *Server) Bind() error {
+	tlsLn, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return fmt.Errorf("не удалось занять TLS-порт %s: %w", s.httpServer.Addr, err)
+	}
+	s.tlsListener = tlsLn
+	if s.certHTTPServer != nil {
+		httpLn, err := net.Listen("tcp", s.certHTTPServer.Addr)
+		if err != nil {
+			tlsLn.Close()
+			return fmt.Errorf("не удалось занять HTTP-порт %s: %w", s.certHTTPServer.Addr, err)
+		}
+		s.httpListener = httpLn
+	}
+	return nil
+}
+
 func (s *Server) Start() error {
 	if s.certHTTPServer != nil {
 		go func() {
 			log.Printf("[SERVER] Starting HushDrop HTTP cert/helper service on %s", s.certHTTPServer.Addr)
-			if err := s.certHTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("[SERVER] HTTP cert service error: %v", err)
+			var serveErr error
+			if s.httpListener != nil {
+				serveErr = s.certHTTPServer.Serve(s.httpListener)
+			} else {
+				serveErr = s.certHTTPServer.ListenAndServe()
+			}
+			if serveErr != nil && serveErr != http.ErrServerClosed {
+				log.Printf("[SERVER] HTTP cert service error: %v", serveErr)
 			}
 		}()
 	}
 
 	log.Printf("[SERVER] Starting HushDrop secure TLS 1.3 server on %s", s.httpServer.Addr)
+	if s.tlsListener != nil {
+		return s.httpServer.ServeTLS(s.tlsListener, "", "")
+	}
 	return s.httpServer.ListenAndServeTLS("", "")
 }
 
