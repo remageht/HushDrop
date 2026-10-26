@@ -1,8 +1,11 @@
 package app.hushdrop.host
 
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.URLDecoder
@@ -26,6 +29,7 @@ data class HostFileMetadata(
     var uploadedChunks: Int,
     var sha256: String,
     val isDangerous: Boolean,
+    var encrypted: Boolean = false,
     var isCompleted: Boolean,
     val createdAt: String,
     var filePath: File? = null,
@@ -45,12 +49,23 @@ data class HostUploadStatus(
     val sha256: String
 )
 
+/**
+ * Result of TransferManager.openDownload: the (possibly decrypting) stream plus the
+ * backing file. The caller must close the stream.
+ */
+class OpenedDownload(val stream: InputStream, val file: File, val encrypted: Boolean)
+
 class TransferManager(
     private val context: Context,
     val maxChunkSize: Long = 4L * 1024 * 1024,          // 4MB
-    val maxFileSize: Long = 5L * 1024 * 1024 * 1024      // 5GB
+    val maxFileSize: Long = 5L * 1024 * 1024 * 1024,    // 5GB
+    atRestKey: ByteArray? = null
 ) {
     private val lock = ReentrantReadWriteLock()
+
+    // Non-null (cloned exactly like Go's bytes.Clone) enables at-rest encryption of
+    // every uploaded file; mirrors transfer.NewManagerWithEncryption.
+    private val atRestKeyBytes: ByteArray? = atRestKey?.copyOf()
 
     private val baseDir = File(context.filesDir, "hushdrop_host").apply { mkdirs() }
     private val downloadsDir = File(baseDir, "downloads").apply { mkdirs() }
@@ -66,6 +81,21 @@ class TransferManager(
     )
 
     companion object {
+        private const val TAG = "TransferManager"
+
+        /**
+         * Creates a manager with at-rest encryption enabled: loads or generates the
+         * master key at filesDir/hushdrop_host/atrest.key (0600-equivalent app-private
+         * storage, mirroring Go's data/atrest.key). Never log the key bytes themselves.
+         */
+        fun withEncryption(context: Context): TransferManager {
+            val keyFile = File(File(context.filesDir, "hushdrop_host"), AtRestCrypto.KEY_FILE_NAME)
+            val key = AtRestCrypto.loadOrCreateAtRestKey(keyFile)
+            Log.i(TAG, "[SECURITY] At-rest encryption enabled. Key file: ${keyFile.path}")
+            Log.i(TAG, "[SECURITY] Do not store the key outside of a trusted device - without it the data cannot be recovered")
+            return TransferManager(context, atRestKey = key)
+        }
+
         fun sanitizeFilename(rawName: String): String {
             var name = try {
                 URLDecoder.decode(rawName, "UTF-8")
@@ -98,6 +128,18 @@ class TransferManager(
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
             sdf.timeZone = TimeZone.getTimeZone("UTC")
             return sdf.format(date)
+        }
+
+        fun sha256Hex(file: File): String {
+            val md = MessageDigest.getInstance("SHA-256")
+            FileInputStream(file).use { fis ->
+                val buf = ByteArray(64 * 1024)
+                var read: Int
+                while (fis.read(buf).also { read = it } != -1) {
+                    md.update(buf, 0, read)
+                }
+            }
+            return md.digest().joinToString("") { String.format(Locale.US, "%02x", it) }
         }
     }
 
@@ -267,14 +309,77 @@ class TransferManager(
         val hashBytes = md.digest()
         meta.sha256 = hashBytes.joinToString("") { String.format(Locale.US, "%02x", it) }
 
-        // Atomic move
-        if (finalFile.exists()) finalFile.delete()
-        if (!tempFile.renameTo(finalFile)) {
-            tempFile.copyTo(finalFile, overwrite = true)
-            tempFile.delete()
+        meta.encrypted = atRestKeyBytes != null
+        if (atRestKeyBytes != null) {
+            encryptToFinal(meta)
+        } else {
+            // Atomic move
+            if (finalFile.exists()) finalFile.delete()
+            if (!tempFile.renameTo(finalFile)) {
+                tempFile.copyTo(finalFile, overwrite = true)
+                tempFile.delete()
+            }
         }
 
         meta.isCompleted = true
+    }
+
+    /**
+     * Streams the plaintext temp file into an at-rest encrypted container at the final
+     * destination (mirror of transfer.encryptToFinalLocked). SHA-256 above always
+     * refers to the plaintext. A failed container write leaves nothing behind.
+     */
+    private fun encryptToFinal(meta: HostFileMetadata) {
+        val tempFile = meta.tempFilePath ?: throw IOException("temp file missing")
+        val finalFile = meta.filePath ?: throw IOException("final path missing")
+        val key = atRestKeyBytes ?: throw IOException("at-rest key not available")
+
+        try {
+            FileOutputStream(finalFile).use { fos ->
+                FileInputStream(tempFile).use { fis ->
+                    AtRestCrypto.encryptStream(fis, fos, key)
+                }
+            }
+
+            // Cheap structural validation: the container must announce itself and be
+            // larger than the plaintext by the framing overhead.
+            if (finalFile.length() <= meta.size) {
+                throw IOException(
+                    "container size ${finalFile.length()} suspiciously small for ${meta.size} plaintext bytes"
+                )
+            }
+            if (!AtRestCrypto.isEncrypted(finalFile)) {
+                throw IOException("written container misses the at-rest magic header")
+            }
+            tempFile.delete()
+        } catch (e: Exception) {
+            finalFile.delete()
+            throw IOException("at-rest encryption of ${meta.cleanName} failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Opens a completed file for reading; encrypted files come back as a streaming
+     * decryptor over the at-rest container (mirror of transfer.OpenDownload).
+     * The caller owns the returned stream; closing it closes the underlying file.
+     */
+    fun openDownload(meta: HostFileMetadata): OpenedDownload {
+        val file = meta.filePath ?: throw IOException("file path missing")
+        val input = FileInputStream(file)
+        if (!meta.encrypted) {
+            return OpenedDownload(input, file, false)
+        }
+        val key = atRestKeyBytes
+        if (key == null) {
+            try { input.close() } catch (_: Exception) {}
+            throw IOException("file is encrypted but the at-rest key is not available")
+        }
+        return try {
+            OpenedDownload(AtRestCrypto.decryptingInputStream(input, key), file, true)
+        } catch (e: Exception) {
+            try { input.close() } catch (_: Exception) {}
+            throw e
+        }
     }
 
     fun listFiles(): List<HostFileMetadata> = lock.read {
@@ -311,30 +416,43 @@ class TransferManager(
         val isDangerous = isDangerousFile(cleanName)
 
         val destinationFile = File(downloadsDir, "${fileId.take(8)}_$cleanName")
-        file.copyTo(destinationFile, overwrite = true)
 
-        // Calculate SHA-256
-        val md = MessageDigest.getInstance("SHA-256")
-        FileInputStream(destinationFile).use { fis ->
-            val buf = ByteArray(64 * 1024)
-            var read: Int
-            while (fis.read(buf).also { read = it } != -1) {
-                md.update(buf, 0, read)
+        // The SHA-256 and size always refer to the plaintext (mirrors Go); in encrypted
+        // mode the source is streamed into an at-rest container at the destination.
+        val sha256 = sha256Hex(file)
+        val plainSize = file.length()
+        val totalChunks = ((plainSize + maxChunkSize - 1) / maxChunkSize).toInt().coerceAtLeast(1)
+
+        val key = atRestKeyBytes
+        if (key != null) {
+            try {
+                FileOutputStream(destinationFile).use { fos ->
+                    FileInputStream(file).use { fis ->
+                        AtRestCrypto.encryptStream(fis, fos, key)
+                    }
+                }
+                if (!AtRestCrypto.isEncrypted(destinationFile)) {
+                    throw IOException("written container misses the at-rest magic header")
+                }
+            } catch (e: Exception) {
+                destinationFile.delete()
+                throw IOException("at-rest encryption of $cleanName failed: ${e.message}", e)
             }
+        } else {
+            file.copyTo(destinationFile, overwrite = true)
         }
-        val sha256 = md.digest().joinToString("") { String.format(Locale.US, "%02x", it) }
-        val totalChunks = ((destinationFile.length() + maxChunkSize - 1) / maxChunkSize).toInt().coerceAtLeast(1)
 
         val meta = HostFileMetadata(
             id = fileId,
             originalName = displayName,
             cleanName = cleanName,
-            size = destinationFile.length(),
+            size = plainSize,
             mimeType = mimeType,
             totalChunks = totalChunks,
             uploadedChunks = totalChunks,
             sha256 = sha256,
             isDangerous = isDangerous,
+            encrypted = key != null,
             isCompleted = true,
             createdAt = formatIsoDate(),
             filePath = destinationFile,

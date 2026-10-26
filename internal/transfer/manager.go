@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hushdrop/internal/crypto"
 )
 
 var safeIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -44,6 +47,7 @@ type FileMetadata struct {
 	UploadedChunks int       `json:"uploadedChunks"`
 	SHA256         string    `json:"sha256"`
 	IsDangerous    bool      `json:"isDangerous"`
+	Encrypted      bool      `json:"isEncrypted,omitempty"`
 	IsCompleted    bool      `json:"isCompleted"`
 	CreatedAt      time.Time `json:"createdAt"`
 	FilePath       string    `json:"-"`
@@ -68,6 +72,7 @@ type Manager struct {
 	maxFileSize  int64
 	files        map[string]*FileMetadata // fileID -> metadata
 	chunkTracker map[string]map[int]bool  // fileID -> set of received chunks
+	atRestKey    []byte                   // non-nil enables at-rest encryption of saved files
 }
 
 func NewManager(downloadsDir, tempDir string, maxChunkSize, maxFileSize int64) *Manager {
@@ -79,6 +84,17 @@ func NewManager(downloadsDir, tempDir string, maxChunkSize, maxFileSize int64) *
 		files:        make(map[string]*FileMetadata),
 		chunkTracker: make(map[string]map[int]bool),
 	}
+}
+
+// NewManagerWithEncryption creates a manager that transparently encrypts every
+// completed upload into the crypto at-rest container format. The key must be exactly
+// crypto.AtRestKeySize bytes (see crypto.LoadOrCreateAtRestKey).
+func NewManagerWithEncryption(downloadsDir, tempDir string, maxChunkSize, maxFileSize int64, atRestKey []byte) *Manager {
+	m := NewManager(downloadsDir, tempDir, maxChunkSize, maxFileSize)
+	if len(atRestKey) > 0 {
+		m.atRestKey = bytes.Clone(atRestKey)
+	}
+	return m
 }
 
 // SanitizeFilename eliminates path traversals, URL-encodings, null bytes, and malicious characters
@@ -316,13 +332,96 @@ func (m *Manager) finalizeUploadLocked(meta *FileMetadata, tracker map[int]bool)
 
 	meta.SHA256 = hex.EncodeToString(hasher.Sum(nil))
 
-	// Move from temp to downloads
-	if err := os.Rename(meta.TempFilePath, meta.FilePath); err != nil {
+	// Store the file: either a plain rename (default) or a streamed at-rest encrypted
+	// container. SHA256 above always refers to the plaintext.
+	meta.Encrypted = m.atRestKey != nil
+	if meta.Encrypted {
+		if err := m.encryptToFinalLocked(meta); err != nil {
+			return fmt.Errorf("at-rest encryption of %s failed: %w", meta.CleanName, err)
+		}
+	} else if err := os.Rename(meta.TempFilePath, meta.FilePath); err != nil {
 		return fmt.Errorf("failed to move temp file to downloads: %w", err)
 	}
 
 	meta.IsCompleted = true
 	return nil
+}
+
+// encryptToFinalLocked streams the plaintext temp file into an at-rest encrypted
+// container at the final destination, verifying the container in the process.
+func (m *Manager) encryptToFinalLocked(meta *FileMetadata) error {
+	src, err := os.Open(meta.TempFilePath)
+	if err != nil {
+		return fmt.Errorf("open temp file: %w", err)
+	}
+
+	dst, err := os.OpenFile(meta.FilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		_ = src.Close()
+		return fmt.Errorf("create final file: %w", err)
+	}
+
+	w, werr := crypto.NewAtRestWriter(dst, m.atRestKey)
+	if werr == nil {
+		buf := make([]byte, 64*1024)
+		_, werr = io.CopyBuffer(w, src, buf)
+		if werr == nil {
+			werr = w.Close()
+		}
+	}
+	if cerr := dst.Close(); werr == nil {
+		werr = cerr
+	}
+	_ = src.Close()
+
+	if werr != nil {
+		// Never leave a partially written container behind.
+		_ = os.Remove(meta.FilePath)
+		return werr
+	}
+
+	// Cheap structural validation: the container must announce itself and outweigh
+	// the plaintext by the framing overhead.
+	out, err := os.Open(meta.FilePath)
+	if err == nil {
+		enc, verr := crypto.IsEncrypted(out)
+		size, _ := out.Seek(0, io.SeekEnd)
+		_ = out.Close()
+		if verr != nil {
+			return verr
+		}
+		if !enc {
+			return errors.New("written container misses the at-rest magic header")
+		}
+		if size <= meta.Size {
+			return fmt.Errorf("container size %d suspiciously small for %d plaintext bytes", size, meta.Size)
+		}
+	}
+
+	_ = os.Remove(meta.TempFilePath)
+	return nil
+}
+
+// OpenDownload opens meta's backing file for reading. Encrypted files are returned as
+// a streaming decryptor over the at-rest container. The caller must close the file.
+func (m *Manager) OpenDownload(meta *FileMetadata) (io.Reader, *os.File, bool, error) {
+	file, err := os.Open(meta.FilePath)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !meta.Encrypted {
+		return file, file, false, nil
+	}
+	if m.atRestKey == nil {
+		_ = file.Close()
+		return nil, nil, false, errors.New("file is encrypted but the at-rest key is not available")
+	}
+	reader, err := crypto.NewAtRestReader(file, m.atRestKey)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, false, err
+	}
+	return reader, file, true, nil
 }
 
 // ListFiles returns a copy of all completed files

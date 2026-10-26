@@ -146,7 +146,7 @@ class HostForegroundService : Service() {
 
             // 4. Instantiate managers
             val pairMgr = PairManager()
-            val transferMgr = TransferManager(applicationContext)
+            val transferMgr = TransferManager.withEncryption(applicationContext)
 
             val server = HushDropServer(
                 context = applicationContext,

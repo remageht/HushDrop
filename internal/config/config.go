@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"hushdrop/internal/crypto"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	Host                 string
 	Portable             bool
 	EncryptStorage       bool
+	EncryptionKeyFile    string
 	DataDir              string
 	CertsDir             string
 	DownloadsDir         string
@@ -37,7 +40,7 @@ func LoadConfig() (*Config, error) {
 	hostFlag := flag.String("host", "0.0.0.0", "Host/interface to bind to")
 	portableFlag := flag.Bool("portable", true, "Portable mode: store all state in ./data alongside the binary")
 	dataDirFlag := flag.String("data", "", "Custom data directory path")
-	encryptStorageFlag := flag.Bool("encrypt-storage", false, "Encrypt saved files on disk (at-rest encryption)")
+	encryptStorageFlag := flag.Bool("encrypt-storage", false, "Encrypt saved files on disk (at-rest encryption; a random key is auto-generated into the data dir)")
 	flag.Parse()
 
 	cfg := &Config{
@@ -95,6 +98,7 @@ func LoadConfig() (*Config, error) {
 	cfg.CertsDir = filepath.Join(cfg.DataDir, "certs")
 	cfg.DownloadsDir = filepath.Join(cfg.DataDir, "downloads")
 	cfg.TempDir = filepath.Join(cfg.DataDir, "temp")
+	cfg.EncryptionKeyFile = filepath.Join(cfg.DataDir, crypto.AtRestKeyFileName)
 
 	// Ensure directories exist
 	for _, dir := range []string{cfg.DataDir, cfg.CertsDir, cfg.DownloadsDir, cfg.TempDir} {

@@ -23,7 +23,7 @@ import (
 	"hushdrop/internal/transfer"
 )
 
-var version = "0.4.0"
+var version = "0.5.0"
 
 // openBrowserDefault is overridden per build via ldflags:
 // console build -> "false", GUI (windowsgui) build -> "true".
@@ -86,8 +86,18 @@ func main() {
 		}
 	}
 
-	// Initialize Transfer Manager
-	transferManager := transfer.NewManager(cfg.DownloadsDir, cfg.TempDir, cfg.MaxChunkSize, cfg.MaxFileSize)
+	// Initialize Transfer Manager (optionally with at-rest encryption key material)
+	var atRestKey []byte
+	if cfg.EncryptStorage {
+		var keyErr error
+		atRestKey, keyErr = crypto.LoadOrCreateAtRestKey(cfg.EncryptionKeyFile)
+		if keyErr != nil {
+			log.Fatalf("Ошибка инициализации ключа at-rest шифрования: %v", keyErr)
+		}
+		log.Printf("[SECURITY] At-rest шифрование включено. Ключ: %s", cfg.EncryptionKeyFile)
+		log.Printf("[SECURITY] Не храните данные и ключ вне доверенной машины — без файлов ключа содержимое не восстановится.")
+	}
+	transferManager := transfer.NewManagerWithEncryption(cfg.DownloadsDir, cfg.TempDir, cfg.MaxChunkSize, cfg.MaxFileSize, atRestKey)
 
 	// Format Pairing URL
 	portStr := fmt.Sprintf("%d", cfg.Port)

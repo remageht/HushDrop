@@ -51,7 +51,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"service":   "HushDrop",
-		"version":   "0.4.0",
+		"version":   "0.5.0",
 		"timestamp": time.Now().Unix(),
 	})
 }
@@ -530,7 +530,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := os.Open(meta.FilePath)
+	reader, file, encrypted, err := s.transferManager.OpenDownload(meta)
 	if err != nil {
 		log.Printf("[DOWNLOAD_OPEN_ERR] %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]string{
@@ -539,15 +539,6 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		log.Printf("[DOWNLOAD_STAT_ERR] %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to stat requested file",
-		})
-		return
-	}
 
 	// Security Headers
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -558,10 +549,32 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Content Disposition (strip CR/LF/quotes defensively against header injection)
 	safeFilename := strings.NewReplacer(`"`, `_`, "\r", "_", "\n", "_").Replace(meta.CleanName)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeFilename))
+
+	if encrypted {
+		// At-rest encrypted container: decrypt while streaming. HTTP Range resumption
+		// is not supported in this mode; the body length equals the plaintext size.
+		w.Header().Del("Accept-Ranges")
+		w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.Copy(w, reader); err != nil {
+			log.Printf("[DOWNLOAD_DECRYPT_COPY_ERR] %s: %v", meta.CleanName, err)
+		}
+		return
+	}
+
 	w.Header().Set("Accept-Ranges", "bytes")
 
+	stat, err := file.Stat()
+	if err != nil {
+		log.Printf("[DOWNLOAD_STAT_ERR] %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to stat requested file",
+		})
+		return
+	}
+
 	// Support HTTP Range headers for resuming & fast parallel download
-	http.ServeContent(w, r, meta.CleanName, stat.ModTime(), file)
+	http.ServeContent(w, r, meta.CleanName, stat.ModTime(), reader.(io.ReadSeeker))
 }
 
 func (s *Server) handleCertDownload(w http.ResponseWriter, r *http.Request) {

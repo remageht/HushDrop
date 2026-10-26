@@ -40,14 +40,14 @@
 - [ ] `internal/discovery/mdns_advertise.go` — advertise `_hushdrop._tcp.` with fingerprint TXT record (currently only client-side NSD browse)
 - [ ] `frontend/src/api/discovery.ts` — mDNS browse via Capacitor `@capacitor-community/mdns` or custom plugin; auto-populate server URL
 - [ ] `mobile/android-host/NsdHelper.kt` — already done (browse side to add)
-- [ ] **At-rest encryption**: optional AES-256-GCM wrapping of files in `./data/downloads/` using a user-chosen passphrase (derived key via Argon2id)
-  - Go: `internal/crypto/atrest.go` — encrypt/decrypt stream
-  - Frontend: passphrase entry modal on download (decrypts in browser via WebCrypto)
-- [ ] `internal/config/config.go` — add `--encrypt-storage` flag
+- [x] **At-rest encryption** (done in [Unreleased]): optional AES-256-GCM streaming container applied on upload finalization; design changed from passphrase+Argon2id to an auto-generated device-local key file (`data/atrest.key`, 32 random bytes, 0600)
+  - Go: `internal/crypto/atrest.go` — V2 wire format (4 MiB authenticated frames, authenticated EOF marker, trailing-junk rejection) + `internal/transfer` wiring (`NewManagerWithEncryption`, streamed decrypt on `/api/download` without Range support) + `--encrypt-storage` flag wired in `cmd/hushdrop/main.go`
+  - Android host: `AtRest.kt` mirrors the same wire format via `javax.crypto` (pinned by a cross-language decrypt-vector test), `TransferManager.withEncryption()` for uploads and share-intent hosted files
+  - Frontend passphrase modal — dropped by design: no passphrase UI needed; `isEncrypted` flag exposed instead
 
 ### Security note
-- Passphrase never leaves device; derivation done client-side for PWA downloads
-- At-rest encryption is opt-in, disabled by default
+- At-rest master key is device-local (`data/atrest.key`; Android: app-private filesDir); no passphrase exists to leak
+- At-rest encryption is opt-in (`--encrypt-storage`), disabled by default; without the key file stored content is unrecoverable
 
 ---
 

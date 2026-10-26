@@ -2,8 +2,10 @@ package transfer
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -125,6 +127,119 @@ func TestTransferManager_ChunkUploadAndIntegrity(t *testing.T) {
 	tm.ClearAll()
 	if _, err := os.Stat(fileMeta.FilePath); !os.IsNotExist(err) {
 		t.Fatalf("expected file to be deleted after ClearAll")
+	}
+}
+
+func TestTransferManager_AtRestEncryption(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hushdrop_test_atrest_temp_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	downloadsDir, err := os.MkdirTemp("", "hushdrop_test_atrest_dl_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(downloadsDir)
+
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+		t.Fatal(err)
+	}
+
+	maxChunk := int64(1024)
+	tm := NewManagerWithEncryption(downloadsDir, tempDir, maxChunk, 1024*1024, key)
+
+	data1 := bytes.Repeat([]byte("X"), 1024)
+	data2 := bytes.Repeat([]byte("Y"), 700)
+	fullData := append(data1, data2...)
+	fullHashBytes := sha256.Sum256(fullData)
+	expectedHash := hex.EncodeToString(fullHashBytes[:])
+
+	fileID := "atrestfile01"
+	meta, err := tm.InitUpload(fileID, "secret_report.txt", int64(len(fullData)), 2)
+	if err != nil {
+		t.Fatalf("InitUpload failed: %v", err)
+	}
+
+	if _, err := tm.WriteChunk(fileID, 0, int64(len(data1)), bytes.NewReader(data1)); err != nil {
+		t.Fatalf("WriteChunk 0 failed: %v", err)
+	}
+	meta, err = tm.WriteChunk(fileID, 1, int64(len(data2)), bytes.NewReader(data2))
+	if err != nil {
+		t.Fatalf("WriteChunk 1 failed: %v", err)
+	}
+	if !meta.IsCompleted {
+		t.Fatalf("file should be completed after final chunk")
+	}
+	if !meta.Encrypted {
+		t.Fatalf("metadata must flag the file as encrypted at rest")
+	}
+
+	// SHA256 stays the plaintext hash (compute on the container would differ)
+	if meta.SHA256 != expectedHash {
+		t.Fatalf("SHA256 mismatch: got %s, want %s", meta.SHA256, expectedHash)
+	}
+
+	fileMeta, err := tm.GetFile(fileID)
+	if err != nil {
+		t.Fatalf("GetFile failed: %v", err)
+	}
+
+	// The container on disk must NOT contain the plaintext and must carry the magic header
+	diskData, err := os.ReadFile(fileMeta.FilePath)
+	if err != nil {
+		t.Fatalf("failed to read container on disk: %v", err)
+	}
+	if bytes.Contains(diskData, bytes.Repeat([]byte("X"), 64)) {
+		t.Fatalf("plaintext leaked into encrypted container")
+	}
+	if !bytes.HasPrefix(diskData, []byte("HUSHDROP_ENC_V2\n")) {
+		t.Fatalf("container misses the V2 magic header")
+	}
+
+	// Download path: streaming decryptor yields the original plaintext
+	reader, file, encrypted, err := tm.OpenDownload(fileMeta)
+	if err != nil {
+		t.Fatalf("OpenDownload failed: %v", err)
+	}
+	defer file.Close()
+	if !encrypted {
+		t.Fatalf("expected encrypted download path")
+	}
+	decrypted, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("decrypt read failed: %v", err)
+	}
+	if !bytes.Equal(decrypted, fullData) {
+		t.Fatalf("decrypted download mismatch")
+	}
+
+	// Wrong key must not decrypt
+	other := NewManagerWithEncryption(downloadsDir, tempDir, maxChunk, 1024*1024, make([]byte, 32))
+	wrongMeta := *fileMeta
+	wrongReader, wrongFile, _, err := other.OpenDownload(&wrongMeta)
+	if err != nil {
+		t.Fatalf("OpenDownload with foreign key failed unexpectedly: %v", err)
+	}
+	if _, err := io.ReadAll(wrongReader); err == nil {
+		t.Fatalf("expected decrypt failure with foreign key")
+	}
+	_ = wrongFile.Close()
+
+	// Idempotent replay of a completed chunk must not rewrite the container
+	before := diskData
+	if _, err := tm.WriteChunk(fileID, 1, int64(len(data2)), bytes.NewReader(data2)); err != nil {
+		t.Fatalf("replay chunk failed: %v", err)
+	}
+	after, err := os.ReadFile(fileMeta.FilePath)
+	if err != nil {
+		t.Fatalf("failed to re-read container: %v", err)
+	}
+	// Nonces are random per write, so a rewritten container would differ byte-wise
+	if !bytes.Equal(after, before) {
+		t.Fatalf("completed file was rewritten by replayed chunk")
 	}
 }
 

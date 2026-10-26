@@ -319,7 +319,7 @@ class HushDropServer(
         val json = JSONObject().apply {
             put("status", "ok")
             put("service", "HushDrop")
-            put("version", "0.4.0")
+            put("version", "0.5.0")
             put("timestamp", System.currentTimeMillis() / 1000L)
         }
         sendResponse(out, 200, "OK", "application/json", json.toString())
@@ -443,6 +443,7 @@ class HushDropServer(
                 put("uploadedChunks", f.uploadedChunks)
                 put("sha256", f.sha256)
                 put("isDangerous", f.isDangerous)
+                put("isEncrypted", f.encrypted)
                 put("isCompleted", f.isCompleted)
                 put("createdAt", f.createdAt)
             })
@@ -813,6 +814,7 @@ class HushDropServer(
                 put("uploadedChunks", meta.uploadedChunks)
                 put("sha256", meta.sha256)
                 put("isDangerous", meta.isDangerous)
+                put("isEncrypted", meta.encrypted)
                 put("isCompleted", meta.isCompleted)
                 put("createdAt", meta.createdAt)
             }
@@ -896,6 +898,35 @@ class HushDropServer(
             .replace("\r", "_")
             .replace("\n", "_")
         val securityWarningHeader = if (meta.isDangerous) "X-Security-Warning: Potentially executable file\r\n" else ""
+
+        if (meta.encrypted) {
+            // At-rest encrypted container: decrypt while streaming. HTTP Range resumption
+            // is not meaningful here; the body length equals the plaintext size.
+            val opened = try {
+                transferManager.openDownload(meta)
+            } catch (e: Exception) {
+                Log.e(tag, "[DOWNLOAD_OPEN_ERR] ${maskFilename(meta.cleanName)}: ${e.message}")
+                sendResponse(out, 500, "Internal Server Error", "application/json",
+                    "{\"error\":\"Failed to open requested file\"}")
+                return
+            }
+            opened.stream.use { ins ->
+                val responseHeaders = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: ${meta.mimeType}\r\n" +
+                        "Content-Length: ${meta.size}\r\n" +
+                        "Content-Disposition: attachment; filename=\"$safeFilename\"\r\n" +
+                        "X-Content-Type-Options: nosniff\r\n" +
+                        securityWarningHeader +
+                        "Connection: close\r\n\r\n"
+                out.write(responseHeaders.toByteArray(StandardCharsets.UTF_8))
+                val buffer = ByteArray(64 * 1024)
+                var read: Int
+                while (ins.read(buffer).also { read = it } != -1) {
+                    out.write(buffer, 0, read)
+                }
+            }
+            return
+        }
 
         if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
             // Range request: 206 Partial Content
