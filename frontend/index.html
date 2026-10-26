@@ -93,6 +93,16 @@
         animation: splashLineDraw 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.95s forwards;
       }
 
+      .splash-drop {
+        opacity: 0;
+        animation: splashDropReturn 0.4s cubic-bezier(0.16, 1, 0.3, 1) 1.05s forwards;
+      }
+
+      @keyframes splashDropReturn {
+        from { opacity: 0; transform: translateY(-6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
       @keyframes splashLineDraw {
         0% { stroke-dashoffset: 40; opacity: 0; }
         25% { opacity: 1; }
@@ -218,6 +228,7 @@
         .splash-arrow-group,
         .splash-arrow,
         .splash-baseline,
+        .splash-drop,
         .splash-symbol,
         .boot-caption,
         .boot-progress,
@@ -246,13 +257,14 @@
             </linearGradient>
           </defs>
           <rect width="100" height="100" rx="24" fill="#0b0f19" />
-          <circle cx="50" cy="50" r="38" fill="none" stroke="#1e293b" stroke-width="2" />
-          <circle class="splash-circle-draw" cx="50" cy="50" r="38" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" />
+          <circle cx="50" cy="46" r="38" fill="none" stroke="#1e293b" stroke-width="2" />
+          <circle class="splash-circle-draw" cx="50" cy="46" r="38" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" />
           <g class="splash-symbol">
             <g class="splash-arrow-group">
-              <path class="splash-arrow" d="M50 24 L50 62 M34 46 L50 62 L66 46" stroke="url(#splash-grad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+              <path class="splash-arrow" d="M50 20 L50 52 M36 38 L50 52 L64 38" stroke="url(#splash-grad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             </g>
-            <path class="splash-baseline" d="M30 74 L70 74" stroke="#10b981" stroke-width="7" stroke-linecap="round" />
+            <path class="splash-drop" d="M50 55.5 C55.0 60.5 57.2 62.5 57.2 65.5 A7.2 7.2 0 1 1 42.8 65.5 C42.8 62.5 45.0 60.5 50 55.5 Z" fill="url(#splash-grad)" />
+            <path class="splash-baseline" d="M34 78 L66 78" stroke="#10b981" stroke-width="7" stroke-linecap="round" />
           </g>
         </svg>
       </div>

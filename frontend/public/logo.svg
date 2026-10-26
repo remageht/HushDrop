@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#10b981" />
+    <linearGradient id="hgrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
       <stop offset="100%" stop-color="#065f46" />
     </linearGradient>
   </defs>
   <rect width="100" height="100" rx="24" fill="#0b0f19" />
-  <circle cx="50" cy="50" r="38" fill="none" stroke="#1e293b" stroke-width="2" />
-  <path d="M50 24 L50 62 M34 46 L50 62 L66 46" stroke="url(#grad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  <path d="M30 74 L70 74" stroke="#10b981" stroke-width="7" stroke-linecap="round" />
+  <circle cx="50" cy="46" r="38" fill="none" stroke="#1e293b" stroke-width="2.2" />
+  <path d="M50 20 L50 52 M36 38 L50 52 L64 38" stroke="url(#hgrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M50 55.5 C55.0 60.5 57.2 62.5 57.2 65.5 A7.2 7.2 0 1 1 42.8 65.5 C42.8 62.5 45.0 60.5 50 55.5 Z" fill="url(#hgrad)" />
+  <ellipse cx="47.8" cy="64.3" rx="1.5" ry="2.0" fill="#a7f3d0" opacity="0.95" />
+  <path d="M34 78 L66 78" stroke="#10b981" stroke-width="7" stroke-linecap="round" />
 </svg>

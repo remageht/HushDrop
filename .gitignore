@@ -48,3 +48,7 @@ Thumbs.db
 
 # AI agent working files (local only, not for public repo)
 .agent/
+
+# Windows resource generated at build time (brand icon + version info)
+cmd/hushdrop/rsrc_windows_amd64.syso
+assets/brand/winres.json

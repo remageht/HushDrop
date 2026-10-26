@@ -15,6 +15,49 @@ if (!(Test-Path "$rootDir\internal\server\web")) {
 }
 Copy-Item -Path "$rootDir\frontend\dist\*" -Destination "$rootDir\internal\server\web\" -Recurse -Force
 
+Write-Host "===> 2b. Generating Windows resource (brand icon + version info)..." -ForegroundColor Cyan
+$version = "0.5.0"
+$brandDir = "$rootDir\assets\brand"
+if (Test-Path "$brandDir\icon-1024.png") {
+    $winres = [ordered]@{
+        "RT_GROUP_ICON" = [ordered]@{
+            "APP" = [ordered]@{
+                "0000" = @("ico/16.png", "ico/24.png", "ico/32.png", "ico/48.png", "ico/64.png", "ico/128.png", "ico/256.png")
+            }
+        }
+        "RT_VERSION" = [ordered]@{
+            "1" = [ordered]@{
+                "0000" = [ordered]@{
+                    "fixed" = [ordered]@{
+                        "file_version"   = "$version.0"
+                        "product_version" = "$version.0"
+                    }
+                    "info" = [ordered]@{
+                        "0409" = [ordered]@{
+                            "ProductName"      = "HushDrop"
+                            "FileDescription"  = "HushDrop P2P LAN transfer"
+                            "FileVersion"      = $version
+                            "ProductVersion"   = $version
+                            "OriginalFilename" = "HushDrop.exe"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    $winres | ConvertTo-Json -Depth 10 | Out-String | ForEach-Object { [System.IO.File]::WriteAllText("$brandDir\winres.json", $_, [System.Text.UTF8Encoding]::new($false)) }
+    Push-Location $brandDir
+    try {
+        go run github.com/tc-hib/go-winres@v0.3.3 make --in winres.json --arch amd64 --out "$rootDir\cmd\hushdrop\rsrc"
+        if ($LASTEXITCODE -ne 0) { throw "go-winres make failed" }
+        Write-Host "   -> rsrc_windows_amd64.syso written (icon + version resource)" -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Host "   -> Skipped: assets/brand/icon-1024.png not found" -ForegroundColor Yellow
+}
+
 Write-Host "===> 3. Compiling Go binaries into ./dist/..." -ForegroundColor Cyan
 $distDir = "$rootDir\dist"
 if (!(Test-Path $distDir)) {
@@ -22,7 +65,7 @@ if (!(Test-Path $distDir)) {
 }
 
 $env:CGO_ENABLED = "0"
-$version = "0.4.0"
+$version = "0.5.0"
 $ldflags = "-s -w -X main.version=$version -X main.openBrowserDefault=false"
 
 # Windows amd64 (console + GUI builds from the same code)
