@@ -17,12 +17,16 @@ import {
   drainPendingSharedFiles,
   emitFilesReady,
 } from '../../mobile/src/share';
+import { parsePairDeepLink } from '../../mobile/src/deep-link';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(apiClient.isAuthenticated());
   const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'peer' | 'host'>('home');
   const [showPairing, setShowPairing] = useState(false);
   const [pairingHost, setPairingHost] = useState<string | undefined>(undefined);
+  // Token/fingerprint delivered by a native deep link (hushdrop://pair) — the WebView
+  // address bar is clean in the app, so PairingModal must get them via props.
+  const [pairingPrefill, setPairingPrefill] = useState<{ token: string; fp?: string } | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingShareCount, setPendingShareCount] = useState<number>(getPendingSharedQueue().length);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -73,9 +77,26 @@ export const App: React.FC = () => {
       setPendingShareCount(queue.length);
     });
 
+    // Deep link -> PairingModal. Handles hushdrop://pair?... and the QR-style
+    // https://host:8443/?token=...&fp=... URL when the OS routes it to the app.
+    const openPairingFromLink = (rawUrl: string) => {
+      if (apiClient.isAuthenticated()) {
+        return; // Already paired with host — re-entry via link changes nothing
+      }
+      try {
+        const link = parsePairDeepLink(rawUrl);
+        setPairingHost(link.serverUrl);
+        setPairingPrefill({ token: link.token, fp: link.fingerprint || undefined });
+        setShowPairing(true);
+      } catch (err) {
+        showToast(`Ссылка отклонена: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
     const cleanupShareBridge = initShareBridge({
       isSessionActive: () => apiClient.isAuthenticated(),
       fetchBlob: (url) => apiClient.fetchLocalBlob(url),
+      onDeepLink: openPairingFromLink,
       onFilesReady: (files) => {
         setActiveTab('send');
         showToast(`Добавлены ${files.length} файлов из Поделиться`);
@@ -84,6 +105,19 @@ export const App: React.FC = () => {
         setPendingShareCount(pendingItems.length);
       },
     });
+
+    // Cold start: the app process was launched directly by a deep link, so no
+    // appUrlOpen event will fire afterwards — ask the App plugin for the launch URL.
+    (async () => {
+      try {
+        const cap = (window as any).Capacitor;
+        if (!cap?.Plugins?.App?.getLaunchUrl) return; // Plain browser PWA
+        const launch = await cap.Plugins.App.getLaunchUrl();
+        if (launch?.url) openPairingFromLink(launch.url);
+      } catch {
+        // No Capacitor bridge — nothing to handle
+      }
+    })();
 
     const unsub = apiClient.subscribeAuth((authed) => {
       setIsAuthenticated(authed);
@@ -145,15 +179,19 @@ export const App: React.FC = () => {
       {showPairing && (
         <PairingModal
           targetHost={pairingHost}
+          initialToken={pairingPrefill?.token}
+          initialFp={pairingPrefill?.fp}
           onSuccess={async () => {
             setIsAuthenticated(true);
             setShowPairing(false);
             setPairingHost(undefined);
+            setPairingPrefill(null);
             await drainSharedQueue();
           }}
           onClose={() => {
             setShowPairing(false);
             setPairingHost(undefined);
+            setPairingPrefill(null);
           }}
         />
       )}

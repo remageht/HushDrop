@@ -7,9 +7,13 @@ interface PairingModalProps {
   onSuccess: () => void;
   onClose?: () => void;
   targetHost?: string;
+  /** Pairing token from a native deep link; window.location.search is empty inside the app WebView. */
+  initialToken?: string;
+  /** Expected TLS fingerprint from a native deep link. */
+  initialFp?: string;
 }
 
-export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, targetHost }) => {
+export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, targetHost, initialToken, initialFp }) => {
   const [pin, setPin] = useState('');
   const [token, setToken] = useState('');
   const [urlFp, setUrlFp] = useState<string | null>(null);
@@ -25,16 +29,19 @@ export const PairingModal: React.FC<PairingModalProps> = ({ onSuccess, onClose, 
       apiClient.setServerBaseUrl(targetHost);
     }
 
-    // Extract query parameters from QR scan
+    // Token/fingerprint, in priority order:
+    // 1. initialToken/initialFp — native deep link (hushdrop://pair) handled by App.tsx
+    // 2. window.location.search — PWA opened in a browser by scanning the QR code
     const params = new URLSearchParams(window.location.search);
-    const paramToken = params.get('token');
-    const paramFp = params.get('fp');
+    const paramToken = initialToken || params.get('token');
+    const paramFp = initialFp || params.get('fp');
 
     if (paramToken) setToken(paramToken);
     if (paramFp) setUrlFp(paramFp);
 
     // Strip pairing secrets from the address bar and browser history
-    if (paramToken || paramFp) {
+    // (browser QR flow only — deep-link tokens never touch the address bar)
+    if (!initialToken && (paramToken || paramFp)) {
       params.delete('token');
       params.delete('fp');
       const rest = params.toString();
