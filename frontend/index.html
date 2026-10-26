@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>HushDrop — Твои файлы. Твоя сеть. Никого лишнего.</title>
     <meta name="description" content="Приватная передача файлов телефон<->ПК без мессенджеров и облака в локальной сети" />
     <meta name="theme-color" content="#090d16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="HushDrop" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
@@ -262,24 +265,9 @@
       </div>
       <div class="boot-error" id="boot-error" style="display: none;" role="alert">
         <p class="boot-error-text">Загрузка занимает слишком много времени</p>
-        <button type="button" class="boot-reload-btn" onclick="window.location.reload()">Перезагрузить</button>
+        <button type="button" id="boot-reload-btn" class="boot-reload-btn">Перезагрузить</button>
       </div>
     </div>
-    <script>
-      (function() {
-        window.__hushdropBootStart = (window.performance && performance.now) ? performance.now() : Date.now();
-        var timer = setTimeout(function() {
-          var splash = document.getElementById('boot-splash');
-          if (splash && !splash.classList.contains('done')) {
-            var err = document.getElementById('boot-error');
-            var prog = document.getElementById('boot-progress');
-            if (err) err.style.display = 'flex';
-            if (prog) prog.style.display = 'none';
-          }
-        }, 8000);
-        window.__hushdropBootTimer = timer;
-      })();
-    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -4,10 +4,11 @@ import { PairingModal } from './components/PairingModal';
 import { SendPage } from './pages/SendPage';
 import { ReceivePage } from './pages/ReceivePage';
 import { HostPage } from './pages/HostPage';
+import { PeerPage } from './pages/PeerPage';
 import { ClipboardCard } from './components/ClipboardCard';
 import { NearbyRadar } from './components/NearbyRadar';
 import { apiClient } from './api/client';
-import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio, CheckCircle } from 'lucide-react';
+import { Send, Download, WifiOff, KeyRound, ShieldCheck, Home, Radio, CheckCircle, Zap } from 'lucide-react';
 import {
   initShareBridge,
   getPendingSharedQueue,
@@ -19,7 +20,7 @@ import {
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(apiClient.isAuthenticated());
-  const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'host'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'send' | 'receive' | 'peer' | 'host'>('home');
   const [showPairing, setShowPairing] = useState(false);
   const [pairingHost, setPairingHost] = useState<string | undefined>(undefined);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -105,6 +106,9 @@ export const App: React.FC = () => {
     if (params.get('tab') === 'host') {
       setActiveTab('host');
     }
+    if (params.get('tab') === 'peer' || params.get('room')) {
+      setActiveTab('peer');
+    }
 
     // Register service worker if supported
     if ('serviceWorker' in navigator) {
@@ -189,6 +193,18 @@ export const App: React.FC = () => {
           >
             <Download className="w-4 h-4" />
             <span>Получить</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('peer')}
+            className={`flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl text-xs font-semibold transition ${
+              activeTab === 'peer'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Zap className="w-4 h-4" />
+            <span>P2P</span>
           </button>
 
           <button
@@ -358,6 +374,7 @@ export const App: React.FC = () => {
               </button>
             </div>
           ))}
+        {activeTab === 'peer' && <PeerPage />}
         {activeTab === 'host' && <HostPage />}
       </main>
 

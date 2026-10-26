@@ -2,6 +2,7 @@ export interface FileItem {
   id: string;
   originalName: string;
   cleanName: string;
+  name?: string;
   size: number;
   mimeType: string;
   totalChunks: number;
@@ -29,7 +30,7 @@ export interface PairInfoResponse {
 
 export interface ActiveTransfer {
   id: string;
-  file: File;
+  file?: File;
   name: string;
   size: number;
   isDangerous: boolean;
@@ -48,5 +49,18 @@ export interface ClipboardItem {
   burnAfterRead: boolean;
   updatedAt: number;
   isEmpty?: boolean;
+}
+
+export interface UploadStatus {
+  id: string;
+  originalName: string;
+  cleanName: string;
+  size: number;
+  totalChunks: number;
+  uploadedChunks: number;
+  receivedChunks: number[];
+  isCompleted: boolean;
+  isDangerous: boolean;
+  sha256?: string;
 }
 

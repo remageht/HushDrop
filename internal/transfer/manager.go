@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,16 @@ type FileMetadata struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	FilePath       string    `json:"-"`
 	TempFilePath   string    `json:"-"`
+}
+
+type UploadStatus struct {
+	FileMetadata
+	ReceivedChunks []int `json:"receivedChunks"`
+}
+
+// IsValidFileID verifies that a file ID is alphanumeric and within length bounds (4-64 chars)
+func IsValidFileID(fileID string) bool {
+	return safeIDRegex.MatchString(fileID) && len(fileID) >= 4 && len(fileID) <= 64
 }
 
 type Manager struct {
@@ -109,17 +120,27 @@ func IsDangerousFile(filename string) bool {
 
 // InitUpload initializes a file upload session
 func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunks int) (*FileMetadata, error) {
-	if !safeIDRegex.MatchString(fileID) || len(fileID) < 4 || len(fileID) > 64 {
+	if !IsValidFileID(fileID) {
 		return nil, errors.New("invalid file id: must be alphanumeric and between 4 and 64 characters")
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if existing, exists := m.files[fileID]; exists && existing.IsCompleted {
-		snapshot := *existing
-		return &snapshot, nil
+	cleanName := SanitizeFilename(rawName)
+
+	if existing, exists := m.files[fileID]; exists {
+		if existing.IsCompleted {
+			snapshot := *existing
+			return &snapshot, nil
+		}
+		if existing.Size == totalSize && existing.CleanName == cleanName {
+			snapshot := *existing
+			return &snapshot, nil
+		}
+		return nil, fmt.Errorf("upload session exists with different metadata")
 	}
+
 	if totalSize <= 0 || totalSize > m.maxFileSize {
 		return nil, fmt.Errorf("invalid declared file size %d: must be between 1 and %d bytes", totalSize, m.maxFileSize)
 	}
@@ -131,7 +152,6 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 		return nil, fmt.Errorf("chunk count mismatch: declared %d bytes needs exactly %d chunks, got %d", totalSize, expectedChunks, totalChunks)
 	}
 
-	cleanName := SanitizeFilename(rawName)
 	isDangerous := IsDangerousFile(cleanName)
 
 	prefix := fileID
@@ -174,7 +194,8 @@ func (m *Manager) InitUpload(fileID, rawName string, totalSize int64, totalChunk
 	m.files[fileID] = meta
 	m.chunkTracker[fileID] = make(map[int]bool)
 
-	return meta, nil
+	snapshot := *meta
+	return &snapshot, nil
 }
 
 // WriteChunk streams a chunk directly to disk at the calculated offset without loading it into RAM
@@ -330,6 +351,30 @@ func (m *Manager) GetFile(fileID string) (*FileMetadata, error) {
 	}
 	copyMeta := *meta
 	return &copyMeta, nil
+}
+
+// GetUploadStatus returns the upload progress and received chunks for a session
+func (m *Manager) GetUploadStatus(fileID string) (*UploadStatus, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	meta, exists := m.files[fileID]
+	if !exists {
+		return nil, os.ErrNotExist
+	}
+
+	received := make([]int, 0, len(m.chunkTracker[fileID]))
+	if tracker, ok := m.chunkTracker[fileID]; ok {
+		for chunkIdx := range tracker {
+			received = append(received, chunkIdx)
+		}
+		sort.Ints(received)
+	}
+
+	return &UploadStatus{
+		FileMetadata:   *meta,
+		ReceivedChunks: received,
+	}, nil
 }
 
 // ClearAll deletes all stored files and temporary chunks from disk ("Забыть всё")

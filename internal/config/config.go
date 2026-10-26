@@ -15,6 +15,7 @@ type Config struct {
 	HTTPPort             int
 	Host                 string
 	Portable             bool
+	EncryptStorage       bool
 	DataDir              string
 	CertsDir             string
 	DownloadsDir         string
@@ -36,6 +37,7 @@ func LoadConfig() (*Config, error) {
 	hostFlag := flag.String("host", "0.0.0.0", "Host/interface to bind to")
 	portableFlag := flag.Bool("portable", true, "Portable mode: store all state in ./data alongside the binary")
 	dataDirFlag := flag.String("data", "", "Custom data directory path")
+	encryptStorageFlag := flag.Bool("encrypt-storage", false, "Encrypt saved files on disk (at-rest encryption)")
 	flag.Parse()
 
 	cfg := &Config{
@@ -43,6 +45,7 @@ func LoadConfig() (*Config, error) {
 		HTTPPort:             *httpPortFlag,
 		Host:                 *hostFlag,
 		Portable:             *portableFlag,
+		EncryptStorage:       *encryptStorageFlag,
 		MaxChunkSize:         4 * 1024 * 1024,      // 4MB max chunk size
 		MaxFileSize:          5 * 1024 * 1024 * 1024, // 5GB max file size
 		RateLimitPerMinute:   60,
@@ -65,6 +68,11 @@ func LoadConfig() (*Config, error) {
 	}
 	if envHost := os.Getenv("HOST"); envHost != "" {
 		cfg.Host = envHost
+	}
+	if envEncryptStorage := os.Getenv("ENCRYPT_STORAGE"); envEncryptStorage != "" {
+		if b, err := strconv.ParseBool(envEncryptStorage); err == nil {
+			cfg.EncryptStorage = b
+		}
 	}
 
 	// Base executable directory for portable resolution

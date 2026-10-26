@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,8 @@ import (
 
 	"hushdrop/internal/clipboard"
 	"hushdrop/internal/discovery"
+	"hushdrop/internal/signaling"
+	"hushdrop/internal/transfer"
 )
 
 const (
@@ -47,7 +51,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"service":   "HushDrop",
-		"version":   "0.3.9",
+		"version":   "0.4.0",
 		"timestamp": time.Now().Unix(),
 	})
 }
@@ -479,6 +483,31 @@ func (s *Server) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleTransferStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" || !transfer.IsValidFileID(id) {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Invalid or missing file id",
+		})
+		return
+	}
+
+	status, err := s.transferManager.GetUploadStatus(id)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Upload session not found",
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, status)
+}
+
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -598,3 +627,52 @@ p { font-size: 14px; line-height: 1.6; color: #94a3b8; }
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(html))
 }
+
+func (s *Server) handleSignalWebSocket(w http.ResponseWriter, r *http.Request) {
+	if s.signalingHub == nil {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "Signaling service unavailable",
+		})
+		return
+	}
+
+	q := r.URL.Query()
+	roomID := strings.TrimSpace(q.Get("room"))
+	if roomID == "" {
+		roomID = "default"
+	}
+	if len(roomID) > 64 {
+		roomID = roomID[:64]
+	}
+
+	peerID := strings.TrimSpace(q.Get("peer"))
+	if peerID == "" {
+		b := make([]byte, 6)
+		_, _ = rand.Read(b)
+		peerID = hex.EncodeToString(b)
+	}
+	if len(peerID) > 64 {
+		peerID = peerID[:64]
+	}
+
+	name := strings.TrimSpace(q.Get("name"))
+	if name == "" {
+		displayLen := len(peerID)
+		if displayLen > 4 {
+			displayLen = 4
+		}
+		name = "Device-" + peerID[:displayLen]
+	}
+	if len(name) > 32 {
+		name = name[:32]
+	}
+
+	conn, err := signaling.Upgrade(w, r)
+	if err != nil {
+		log.Printf("[SIGNALING_ERR] Handshake failed from %s: %v", MaskIP(extractIP(r)), err)
+		return
+	}
+
+	s.signalingHub.HandleClient(conn, roomID, peerID, name)
+}
+

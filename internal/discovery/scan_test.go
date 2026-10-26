@@ -124,7 +124,7 @@ func TestScanner_PeerFilteringByService(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  "ok",
 				"service": "HushDrop",
-				"version": "0.3.9",
+				"version": "0.4.0",
 			})
 			return
 		}
@@ -172,8 +172,8 @@ func TestScanner_PeerFilteringByService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProbeNode(HushDrop) failed: %v", err)
 	}
-	if node.Version != "0.3.9" {
-		t.Errorf("expected version 0.3.9, got %s", node.Version)
+	if node.Version != "0.4.0" {
+		t.Errorf("expected version 0.4.0, got %s", node.Version)
 	}
 	if node.Port != hdPort {
 		t.Errorf("expected port %d, got %d", hdPort, node.Port)

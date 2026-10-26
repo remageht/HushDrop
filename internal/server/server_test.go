@@ -443,4 +443,160 @@ func TestServer_NearbyScanRateLimitAndAuth(t *testing.T) {
 	}
 }
 
+func TestServer_SecurityHeaders(t *testing.T) {
+	srv, _, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("Referrer-Policy = %q, want no-referrer", got)
+	}
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header is missing")
+	}
+	for _, directive := range []string{
+		"default-src 'self'",
+		"script-src 'self'",
+		"object-src 'none'",
+		"frame-ancestors 'none'",
+		"connect-src 'self' https:",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("CSP %q does not contain %q", csp, directive)
+		}
+	}
+	if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Errorf("CSP must not allow inline scripts: %q", csp)
+	}
+}
+
+func TestServer_TransferStatus(t *testing.T) {
+	srv, pm, tm, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	clientIP := "192.168.1.100:45678"
+	pin, token, _ := pm.GetActivePairingDetails()
+
+	// 1. Pair client
+	pairBody, _ := json.Marshal(map[string]string{"pin": pin, "token": token})
+	req := httptest.NewRequest(http.MethodPost, "/api/pair", bytes.NewReader(pairBody))
+	req.RemoteAddr = clientIP
+	rec := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pairing failed: %d", rec.Code)
+	}
+
+	var pairResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &pairResp)
+	accessToken := pairResp["accessToken"].(string)
+
+	// 2. Unauthorized request -> 401
+	req = httptest.NewRequest(http.MethodGet, "/api/transfer/status?id=file1234", nil)
+	req.RemoteAddr = clientIP
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized without token, got %d", rec.Code)
+	}
+
+	// 3. Method not allowed (POST) -> 405
+	req = httptest.NewRequest(http.MethodPost, "/api/transfer/status?id=file1234", nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+
+	// 4. Missing or invalid file ID -> 400
+	for _, badID := range []string{"", "../bad", "abc"} {
+		req = httptest.NewRequest(http.MethodGet, "/api/transfer/status?id="+badID, nil)
+		req.RemoteAddr = clientIP
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		rec = httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for bad id %q, got %d", badID, rec.Code)
+		}
+		var errResp map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		if errResp["error"] != "Invalid or missing file id" {
+			t.Fatalf("expected error 'Invalid or missing file id', got %q", errResp["error"])
+		}
+	}
+
+	// 5. Session not found -> 404
+	req = httptest.NewRequest(http.MethodGet, "/api/transfer/status?id=file1234", nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-existent session, got %d", rec.Code)
+	}
+	var notFoundResp map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &notFoundResp)
+	if notFoundResp["error"] != "Upload session not found" {
+		t.Fatalf("expected error 'Upload session not found', got %q", notFoundResp["error"])
+	}
+
+	// 6. Initialize upload and write chunk 0
+	fileID := "file1234"
+	_, err := tm.InitUpload(fileID, "status_test.bin", 100, 1)
+	if err != nil {
+		t.Fatalf("InitUpload failed: %v", err)
+	}
+
+	// Query status before chunk write
+	req = httptest.NewRequest(http.MethodGet, "/api/transfer/status?id="+fileID, nil)
+	req.RemoteAddr = clientIP
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var status transfer.UploadStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to decode UploadStatus: %v", err)
+	}
+	if status.ID != fileID || status.UploadedChunks != 0 || len(status.ReceivedChunks) != 0 || status.IsCompleted {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+
+	// Write chunk 0
+	_, err = tm.WriteChunk(fileID, 0, 100, bytes.NewReader(bytes.Repeat([]byte("Z"), 100)))
+	if err != nil {
+		t.Fatalf("WriteChunk failed: %v", err)
+	}
+
+	// Query status after chunk write
+	rec = httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to decode UploadStatus: %v", err)
+	}
+	if status.UploadedChunks != 1 || len(status.ReceivedChunks) != 1 || status.ReceivedChunks[0] != 0 || !status.IsCompleted {
+		t.Fatalf("unexpected completed status: %+v", status)
+	}
+}
+
 

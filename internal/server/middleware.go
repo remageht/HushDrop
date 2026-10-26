@@ -135,7 +135,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		path := r.URL.Path
 
 		// Do not count static frontend assets, health checks, or pairing discovery against the rate limit
-		if path == "/" || path == "/health" || path == "/api/pair/info" || !strings.HasPrefix(path, "/api/") {
+		if path == "/" || path == "/health" || path == "/api/pair/info" || path == "/api/signal" || !strings.HasPrefix(path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -169,16 +169,22 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check Bearer Token
+		// Check Bearer Token (header or query parameter for WebSockets)
+		token := ""
 		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		} else if path == "/api/signal" {
+			token = r.URL.Query().Get("token")
+		}
+
+		if token == "" {
 			respondJSON(w, http.StatusUnauthorized, map[string]string{
 				"error": "Unauthorized: missing bearer token",
 			})
 			return
 		}
 
-		token := strings.TrimPrefix(authHeader, "Bearer ")
 		session, valid := s.pairManager.ValidateSession(token)
 		if !valid || session == nil {
 			respondJSON(w, http.StatusUnauthorized, map[string]string{
@@ -197,6 +203,14 @@ func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		// The PWA is served by this server, so the policy must come from here.
+		// script-src stays 'self': the boot splash script lives in the bundle.
+		// connect-src includes wss: for local WebRTC signaling.
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: wss:; "+
+				"manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; "+
+				"frame-ancestors 'none'; form-action 'self'")
 
 		// Pairing responses carry secrets: never cache them
 		if r.URL.Path == "/api/pair" || r.URL.Path == "/api/pair/refresh" || r.URL.Path == "/api/pair/info" {

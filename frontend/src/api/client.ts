@@ -1,4 +1,24 @@
-import { FileItem, PairInfoResponse, PairSession, ClipboardItem } from '../types';
+import { FileItem, PairInfoResponse, PairSession, ClipboardItem, UploadStatus } from '../types';
+
+export function getFileSessionId(file: File): string {
+  let hash = 0;
+  const str = `${file.name}-${file.size}-${file.lastModified}`;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const hex = Math.abs(hash).toString(16).padStart(8, '0');
+  return `up_${hex}_${file.size.toString(36)}`;
+}
+
+class HttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
 
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
 
@@ -63,6 +83,10 @@ class ApiClient {
 
   public isAuthenticated(): boolean {
     return !!this.accessToken;
+  }
+
+  public getAccessToken(): string | null {
+    return this.accessToken;
   }
 
   public getFingerprint(): string | null {
@@ -284,6 +308,13 @@ class ApiClient {
     return await res.blob();
   }
 
+  public async getUploadStatus(fileId: string): Promise<UploadStatus | null> {
+    const resp = await this.fetchWithAuth(`/api/transfer/status?id=${encodeURIComponent(fileId)}`);
+    if (resp.status === 404) return null;
+    if (!resp.ok) throw new Error(`Ошибка проверки статуса загрузки (${resp.status})`);
+    return resp.json();
+  }
+
   public async uploadChunk(
     fileId: string,
     fileName: string,
@@ -293,62 +324,138 @@ class ApiClient {
     chunkBlob: Blob,
     signal?: AbortSignal
   ): Promise<{ isCompleted: boolean; file?: FileItem }> {
-    const headers = new Headers({
-      'Content-Type': 'application/octet-stream',
-      'X-File-Id': fileId,
-      'X-Chunk-Index': String(chunkIndex),
-      'X-Total-Chunks': String(totalChunks),
-      'X-File-Name': encodeURIComponent(fileName),
-      'X-File-Size': String(fileSize),
-    });
+    const maxAttempts = 3;
+    let lastError: unknown;
 
-    const response = await this.fetchWithAuth('/api/upload', {
-      method: 'POST',
-      headers,
-      body: chunkBlob,
-      signal,
-    });
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
 
-    if (response.status === 413) {
-      throw new Error('Размер чанка превышает 4МБ или файл более 5ГБ.');
-    }
-
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('Retry-After') || '60';
-      throw new Error(`Превышен лимит запросов. Подождите ${retryAfter} сек. и продолжите передачу.`);
-    }
-
-    if (!response.ok) {
-      let msg = `Ошибка передачи чанка #${chunkIndex}`;
       try {
-        const body = await response.json();
-        if (body.error) msg = body.error;
-      } catch {}
-      throw new Error(msg);
+        const headers = new Headers({
+          'Content-Type': 'application/octet-stream',
+          'X-File-Id': fileId,
+          'X-Chunk-Index': String(chunkIndex),
+          'X-Total-Chunks': String(totalChunks),
+          'X-File-Name': encodeURIComponent(fileName),
+          'X-File-Size': String(fileSize),
+        });
+
+        const response = await this.fetchWithAuth('/api/upload', {
+          method: 'POST',
+          headers,
+          body: chunkBlob,
+          signal,
+        });
+
+        if (response.status === 401) {
+          throw new HttpError('Ошибка авторизации (401)', 401);
+        }
+
+        if (response.status === 413) {
+          throw new HttpError('Размер чанка превышает 4МБ или файл более 5ГБ.', 413);
+        }
+
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After') || '60';
+          throw new Error(`Превышен лимит запросов. Подождите ${retryAfter} сек. и продолжите передачу.`);
+        }
+
+        if (!response.ok) {
+          let msg = `Ошибка передачи чанка #${chunkIndex}`;
+          try {
+            const body = await response.json();
+            if (body && body.error) msg = body.error;
+          } catch {}
+          throw new Error(msg);
+        }
+
+        return await response.json();
+      } catch (err: any) {
+        lastError = err;
+        const isAbort =
+          signal?.aborted ||
+          err?.name === 'AbortError' ||
+          err?.message?.includes('Aborted') ||
+          err?.message?.includes('отменена');
+        const isNonRetryable =
+          err instanceof HttpError && (err.status === 401 || err.status === 413);
+
+        if (isAbort || isNonRetryable || attempt === maxAttempts) {
+          throw err;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 500);
+          if (signal) {
+            signal.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(new DOMException('Aborted', 'AbortError'));
+              },
+              { once: true }
+            );
+          }
+        });
+      }
     }
 
-    return response.json();
+    throw lastError;
   }
 
   public async uploadFile(
     file: File,
     onProgress: (percent: number, speedBytesPerSec: number, etaSeconds: number) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    customFileId?: string
   ): Promise<FileItem | undefined> {
     if (file.size <= 0) {
       throw new Error('Пустой файл (0 байт) не поддерживается');
     }
 
-    const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const fileId = customFileId || getFileSessionId(file);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-    let uploadedBytes = 0;
+    const status = await this.getUploadStatus(fileId).catch(() => null);
+    if (status && status.isCompleted) {
+      onProgress(100, 0, 0);
+      return {
+        id: fileId,
+        originalName: status.originalName || file.name,
+        cleanName: status.cleanName || file.name,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        totalChunks: status.totalChunks || totalChunks,
+        uploadedChunks: status.uploadedChunks || totalChunks,
+        sha256: status.sha256 || '',
+        createdAt: new Date().toISOString(),
+        isDangerous: status.isDangerous,
+        isCompleted: true,
+      };
+    }
+
+    const receivedSet = new Set<number>(status?.receivedChunks || []);
+    let uploadedBytes = Math.min(file.size, receivedSet.size * CHUNK_SIZE);
+
+    if (uploadedBytes > 0) {
+      const initialPercent = Math.min(100, Math.round((uploadedBytes / file.size) * 100));
+      onProgress(initialPercent, 0, 0);
+    }
+
     const startTime = Date.now();
+    let bytesUploadedInThisSession = 0;
     let completedItem: FileItem | undefined;
 
     for (let i = 0; i < totalChunks; i++) {
       if (signal?.aborted) {
         throw new Error('Передача отменена');
+      }
+
+      if (receivedSet.has(i)) {
+        continue;
       }
 
       const start = i * CHUNK_SIZE;
@@ -366,8 +473,9 @@ class ApiClient {
       );
 
       uploadedBytes += (end - start);
+      bytesUploadedInThisSession += (end - start);
       const elapsedSec = (Date.now() - startTime) / 1000;
-      const speed = elapsedSec > 0 ? uploadedBytes / elapsedSec : 0;
+      const speed = elapsedSec > 0 ? bytesUploadedInThisSession / elapsedSec : 0;
       const remainingBytes = file.size - uploadedBytes;
       const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
       const percent = Math.min(100, Math.round((uploadedBytes / file.size) * 100));
@@ -377,6 +485,23 @@ class ApiClient {
       if (result.isCompleted && result.file) {
         completedItem = result.file;
       }
+    }
+
+    if (!completedItem && uploadedBytes >= file.size) {
+      completedItem = {
+        id: fileId,
+        originalName: status?.originalName || file.name,
+        cleanName: status?.cleanName || file.name,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        totalChunks: totalChunks,
+        uploadedChunks: totalChunks,
+        sha256: status?.sha256 || '',
+        createdAt: new Date().toISOString(),
+        isDangerous: status?.isDangerous || false,
+        isCompleted: true,
+      };
     }
 
     return completedItem;
@@ -396,10 +521,13 @@ class ApiClient {
     const a = document.createElement('a');
     a.href = url;
     a.download = fileName;
+    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    }, 1500);
   }
 
   public async getClipboard(): Promise<ClipboardItem> {

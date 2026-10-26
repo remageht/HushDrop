@@ -32,6 +32,19 @@ data class HostFileMetadata(
     var tempFilePath: File? = null
 )
 
+data class HostUploadStatus(
+    val id: String,
+    val originalName: String,
+    val cleanName: String,
+    val size: Long,
+    val totalChunks: Int,
+    val uploadedChunks: Int,
+    val receivedChunks: List<Int>,
+    val isCompleted: Boolean,
+    val isDangerous: Boolean,
+    val sha256: String
+)
+
 class TransferManager(
     private val context: Context,
     val maxChunkSize: Long = 4L * 1024 * 1024,          // 4MB
@@ -124,6 +137,16 @@ class TransferManager(
         }
         if (!canonicalFinal.startsWith(downloadsDir.canonicalPath)) {
             throw SecurityException("destination path escape detected")
+        }
+
+        val existing = files[fileId]
+        if (existing != null && existing.size == totalSize && existing.cleanName == cleanName) {
+            if (existing.isCompleted && existing.filePath?.exists() == true) {
+                return existing
+            }
+            if (tempFile.exists()) {
+                return existing
+            }
         }
 
         if (tempFile.exists()) {
@@ -262,6 +285,24 @@ class TransferManager(
         val meta = files[fileId] ?: return null
         if (!meta.isCompleted) return null
         meta
+    }
+
+    fun getUploadStatus(fileId: String): HostUploadStatus? = lock.read {
+        val meta = files[fileId] ?: return null
+        val tracker = chunkTrackers[fileId]
+        val chunks = tracker?.toList()?.sorted() ?: emptyList()
+        HostUploadStatus(
+            id = meta.id,
+            originalName = meta.originalName,
+            cleanName = meta.cleanName,
+            size = meta.size,
+            totalChunks = meta.totalChunks,
+            uploadedChunks = meta.uploadedChunks,
+            receivedChunks = chunks,
+            isCompleted = meta.isCompleted,
+            isDangerous = meta.isDangerous,
+            sha256 = meta.sha256
+        )
     }
 
     fun addHostedFile(file: File, displayName: String, mimeType: String = "application/octet-stream"): HostFileMetadata = lock.write {

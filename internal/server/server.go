@@ -15,6 +15,7 @@ import (
 	"hushdrop/internal/crypto"
 	"hushdrop/internal/discovery"
 	"hushdrop/internal/pair"
+	"hushdrop/internal/signaling"
 	"hushdrop/internal/transfer"
 )
 
@@ -24,6 +25,7 @@ type Server struct {
 	pairManager      *pair.Manager
 	transferManager  *transfer.Manager
 	clipboardManager *clipboard.Manager
+	signalingHub     *signaling.Hub
 	limiter          *ipRateLimiter
 	nearbyScanner    *discovery.Scanner
 	scanMu           sync.Mutex
@@ -59,6 +61,7 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 		pairManager:      pm,
 		transferManager:  tm,
 		clipboardManager: clipboard.NewManager(),
+		signalingHub:     signaling.NewHub(),
 		limiter:          newRateLimiter(cfg.RateLimitPerMinute, time.Minute),
 		nearbyScanner:    discovery.NewScanner(32, 800*time.Millisecond),
 		scanCooldowns:    make(map[string]time.Time),
@@ -76,7 +79,9 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 	mux.HandleFunc("/api/clipboard", s.handleClipboard)
 	mux.HandleFunc("/api/nearby/scan", s.handleNearbyScan)
 	mux.HandleFunc("/api/upload", s.handleUploadChunk)
+	mux.HandleFunc("/api/transfer/status", s.handleTransferStatus)
 	mux.HandleFunc("/api/download", s.handleDownload)
+	mux.HandleFunc("/api/signal", s.handleSignalWebSocket)
 	mux.HandleFunc("/cert", s.handleCertDownload)
 	mux.HandleFunc("/api/cert", s.handleCertDownload)
 
@@ -123,7 +128,9 @@ func NewServer(cfg *config.Config, tlsInfo *crypto.TLSInfo, pm *pair.Manager, tm
 		certMux.HandleFunc("/", s.handleHTTPHelperLanding)
 
 		certHandler := s.recoveryMiddleware(
-			s.lanFilterMiddleware(certMux),
+			s.securityHeadersMiddleware(
+				s.lanFilterMiddleware(certMux),
+			),
 		)
 
 		s.certHTTPServer = &http.Server{

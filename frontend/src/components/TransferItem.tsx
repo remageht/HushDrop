@@ -1,13 +1,14 @@
 import React from 'react';
 import { ActiveTransfer } from '../types';
-import { File, AlertTriangle, CheckCircle2, XCircle, X, Loader2 } from 'lucide-react';
+import { File, AlertTriangle, CheckCircle2, XCircle, X, Loader2, RotateCw } from 'lucide-react';
 
 interface TransferItemProps {
   transfer: ActiveTransfer;
   onCancel: (id: string) => void;
+  onResume?: (id: string) => void;
 }
 
-export const TransferItem: React.FC<TransferItemProps> = ({ transfer, onCancel }) => {
+export const TransferItem: React.FC<TransferItemProps> = ({ transfer, onCancel, onResume }) => {
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -60,7 +61,7 @@ export const TransferItem: React.FC<TransferItemProps> = ({ transfer, onCancel }
           </div>
         </div>
 
-        <div>
+        <div className="flex items-center space-x-2">
           {transfer.status === 'uploading' && (
             <button
               onClick={() => onCancel(transfer.id)}
@@ -84,6 +85,15 @@ export const TransferItem: React.FC<TransferItemProps> = ({ transfer, onCancel }
           )}
           {transfer.status === 'cancelled' && (
             <span className="text-xs text-slate-500 font-medium">Отменено</span>
+          )}
+          {(transfer.status === 'error' || transfer.status === 'cancelled') && onResume && (
+            <button
+              onClick={() => onResume(transfer.id)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition"
+              title="Возобновить передачу"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
           )}
         </div>
       </div>

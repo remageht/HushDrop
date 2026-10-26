@@ -49,6 +49,7 @@ class HushDropServer(
     private val threadPool = Executors.newFixedThreadPool(32)
     private val scanCooldowns = ConcurrentHashMap<String, Long>()
     private val scanInProgress = AtomicBoolean(false)
+    private val safeIdRegex = Regex("^[a-zA-Z0-9_-]{4,64}$")
 
     private var httpsServerSocket: SSLServerSocket? = null
     private var httpServerSocket: ServerSocket? = null
@@ -295,6 +296,7 @@ class HushDropServer(
                 path == "/api/clipboard" && method == "DELETE" -> handleDeleteClipboard(output)
                 path == "/api/nearby/scan" && method == "POST" -> handleNearbyScan(input, output, headers, clientIp, sessionToken)
                 path == "/api/upload" && method == "POST" -> handleUpload(input, output, headers)
+                path == "/api/transfer/status" && method == "GET" -> handleTransferStatus(output, queryString)
                 path == "/api/download" && method == "GET" -> handleDownload(output, queryString, headers)
                 path == "/cert" && method == "GET" -> handleCertDownload(output)
                 else -> sendResponse(output, 404, "Not Found", "application/json", "{\"error\":\"Not found\"}")
@@ -317,7 +319,7 @@ class HushDropServer(
         val json = JSONObject().apply {
             put("status", "ok")
             put("service", "HushDrop")
-            put("version", "0.3.9")
+            put("version", "0.4.0")
             put("timestamp", System.currentTimeMillis() / 1000L)
         }
         sendResponse(out, 200, "OK", "application/json", json.toString())
@@ -831,6 +833,42 @@ class HushDropServer(
         }
     }
 
+    private fun handleTransferStatus(output: OutputStream, queryString: String) {
+        val params = parseQueryParams(queryString)
+        val fileId = params["id"]
+
+        if (fileId == null || !safeIdRegex.matches(fileId)) {
+            val resp = JSONObject().apply { put("error", "Invalid or missing file id") }
+            sendResponse(output, 400, "Bad Request", "application/json", resp.toString())
+            return
+        }
+
+        val status = transferManager.getUploadStatus(fileId)
+        if (status == null) {
+            val resp = JSONObject().apply { put("error", "Upload session not found") }
+            sendResponse(output, 404, "Not Found", "application/json", resp.toString())
+            return
+        }
+
+        val json = JSONObject().apply {
+            put("id", status.id)
+            put("originalName", status.originalName)
+            put("cleanName", status.cleanName)
+            put("size", status.size)
+            put("totalChunks", status.totalChunks)
+            put("uploadedChunks", status.uploadedChunks)
+            val chunksArray = JSONArray()
+            for (chunk in status.receivedChunks) {
+                chunksArray.put(chunk)
+            }
+            put("receivedChunks", chunksArray)
+            put("isCompleted", status.isCompleted)
+            put("isDangerous", status.isDangerous)
+            put("sha256", status.sha256)
+        }
+        sendResponse(output, 200, "OK", "application/json", json.toString())
+    }
+
     private fun handleDownload(out: OutputStream, queryString: String, headers: Map<String, String>) {
         val params = parseQueryParams(queryString)
         val fileId = params["id"]
@@ -998,6 +1036,7 @@ class HushDropServer(
         val bytes = html.toByteArray(StandardCharsets.UTF_8)
         val responseHeaders = "HTTP/1.1 200 OK\r\n" +
                 "Content-Type: text/html; charset=utf-8\r\n" +
+                "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'\r\n" +
                 "Content-Length: ${bytes.size}\r\n" +
                 "Connection: close\r\n\r\n"
 

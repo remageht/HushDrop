@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, FolderUp, FileUp, AlertTriangle, ShieldCheck } from 'lucide-react';
-import { apiClient } from '../api/client';
+import { apiClient, getFileSessionId } from '../api/client';
 import { subscribeFilesReady } from '../../../mobile/src/share';
 import { ActiveTransfer } from '../types';
 import { TransferItem } from '../components/TransferItem';
@@ -8,10 +8,13 @@ import { ClipboardCard } from '../components/ClipboardCard';
 
 const dangerousExts = ['.exe', '.bat', '.cmd', '.ps1', '.sh', '.msi', '.vbs', '.com'];
 
+import { createZipFromFiles } from '../utils/zip';
+
 export const SendPage: React.FC = () => {
   const [transfers, setTransfers] = useState<ActiveTransfer[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [pendingWarningFiles, setPendingWarningFiles] = useState<File[] | null>(null);
+  const [isZipping, setIsZipping] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +36,27 @@ export const SendPage: React.FC = () => {
     const files = Array.from(fileList);
     if (files.length === 0) return;
 
+    // If files came from a directory selection (webkitRelativePath present)
+    const hasRelativePaths = files.some((f) => !!f.webkitRelativePath && f.webkitRelativePath.includes('/'));
+    if (hasRelativePaths) {
+      const rootFolder = files[0].webkitRelativePath.split('/')[0] || 'folder';
+      setIsZipping(true);
+      createZipFromFiles(
+        files.map((f) => ({ file: f, relativePath: f.webkitRelativePath })),
+        `${rootFolder}.zip`
+      )
+        .then((zipFile) => {
+          setIsZipping(false);
+          startUploadQueue([zipFile]);
+        })
+        .catch((err) => {
+          setIsZipping(false);
+          console.error('Failed to zip folder:', err);
+          startUploadQueue(files);
+        });
+      return;
+    }
+
     // Check if any files are potentially executable
     const hasDangerous = files.some((f) => isDangerous(f.name));
     if (hasDangerous) {
@@ -51,12 +75,12 @@ export const SendPage: React.FC = () => {
       }
       activeKeysRef.current.add(fileKey);
 
-      const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const id = getFileSessionId(file);
       const abortController = new AbortController();
 
       const newTransfer: ActiveTransfer = {
         id,
-        file,
+        file: file,
         name: file.name,
         size: file.size,
         isDangerous: isDangerous(file.name),
@@ -69,7 +93,7 @@ export const SendPage: React.FC = () => {
         abortController,
       };
 
-      setTransfers((prev) => [newTransfer, ...prev]);
+      setTransfers((prev) => [newTransfer, ...prev.filter((t) => t.id !== id)]);
 
       // Upload via ApiClient
       apiClient
@@ -89,7 +113,8 @@ export const SendPage: React.FC = () => {
               )
             );
           },
-          abortController.signal
+          abortController.signal,
+          id
         )
         .then(() => {
           activeKeysRef.current.delete(fileKey);
@@ -114,6 +139,73 @@ export const SendPage: React.FC = () => {
           );
         });
     });
+  };
+
+  const handleResume = (id: string) => {
+    const item = transfers.find((t) => t.id === id);
+    if (!item || !item.file) return;
+
+    const file = item.file;
+    const fileKey = `${file.name}-${file.size}-${file.lastModified}`;
+    activeKeysRef.current.add(fileKey);
+
+    const newController = new AbortController();
+
+    setTransfers((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              status: 'uploading',
+              errorMessage: undefined,
+              abortController: newController,
+            }
+          : t
+      )
+    );
+
+    apiClient
+      .uploadFile(
+        item.file,
+        (percent, speed, eta) => {
+          setTransfers((prev) =>
+            prev.map((t) =>
+              t.id === id
+                ? {
+                    ...t,
+                    progressPercent: percent,
+                    speedBytesPerSec: speed,
+                    etaSeconds: eta,
+                  }
+                : t
+            )
+          );
+        },
+        newController.signal,
+        item.id
+      )
+      .then(() => {
+        activeKeysRef.current.delete(fileKey);
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === id ? { ...t, status: 'completed', progressPercent: 100 } : t
+          )
+        );
+      })
+      .catch((err) => {
+        activeKeysRef.current.delete(fileKey);
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  status: newController.signal.aborted ? 'cancelled' : 'error',
+                  errorMessage: err.message,
+                }
+              : t
+          )
+        );
+      });
   };
 
   const handleCancel = (id: string) => {
@@ -183,6 +275,12 @@ export const SendPage: React.FC = () => {
             <span>Выбрать папку</span>
           </button>
         </div>
+
+        {isZipping && (
+          <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center justify-center space-x-2 animate-pulse">
+            <span>Упаковка папки в ZIP на лету...</span>
+          </div>
+        )}
 
         {/* Hidden inputs */}
         <input
@@ -264,7 +362,12 @@ export const SendPage: React.FC = () => {
         ) : (
           <div className="space-y-3">
             {transfers.map((item) => (
-              <TransferItem key={item.id} transfer={item} onCancel={handleCancel} />
+              <TransferItem
+                key={item.id}
+                transfer={item}
+                onCancel={handleCancel}
+                onResume={handleResume}
+              />
             ))}
           </div>
         )}
