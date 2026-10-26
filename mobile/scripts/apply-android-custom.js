@@ -102,9 +102,9 @@ def getAppVersionName() {
     def pkg = file('../../package.json')
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
-        return json.version ?: "0.3.9"
+        return json.version ?: "0.4.0"
     }
-    return "0.3.9"
+    return "0.4.0"
 }
 
 def getAppVersionCode() {
@@ -112,7 +112,7 @@ def getAppVersionCode() {
     if (pkg.exists()) {
         def json = new groovy.json.JsonSlurper().parseText(pkg.text)
         if (json.versionCode) return json.versionCode.toInteger()
-        def v = json.version ?: "0.3.9"
+        def v = json.version ?: "0.4.0"
         def parts = v.tokenize('.')
         if (parts.size() >= 3) {
             try {
@@ -120,7 +120,7 @@ def getAppVersionCode() {
             } catch (Exception ignored) {}
         }
     }
-    return 35
+    return 40
 }
 `;
     if (gradle.includes("apply plugin: 'com.android.application'")) {

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-26
+
+### Added
+- **Direct P2P transfers (WebRTC)**: signaling over WebSocket implemented on the Go standard library (RFC 6455, zero dependencies) with room isolation, up to 8 peers per room and a 64 KB message cap; new "P2P" tab with rooms, drag-and-drop DataChannel transfer (strict LAN-only `iceServers: []`, 64 KB chunks with SCTP backpressure) and instant clipboard sync.
+- **Upload resume**: deterministic per-file session id (name+size+lastModified), new `GET /api/transfer/status` endpoint (Go and Android host in parallel) reporting received chunks; the client skips already-uploaded chunks, retries failed chunks (3 attempts, exponential backoff) and offers a "Resume" button for failed/cancelled transfers.
+- **At-rest encryption groundwork**: AES-256-GCM streams with Argon2id-derived keys (16-byte salt, 12-byte nonce) in `internal/crypto/atrest.go` plus tests; `--encrypt-storage` config flag added (wiring into finalization is a follow-up).
+- **Folder upload**: zero-dependency STORE-method ZIP builder on the client (`frontend/src/utils/zip.ts`).
+
+### Fixed
+- **CSP is now served by the servers, not the Tauri config**: strict `Content-Security-Policy` header on the Go PWA and the HTTP cert/helper landing (including `wss:` for signaling) and on the Android host certificate landing; the boot-splash script moved from `index.html` into the JS bundle so `script-src 'self'` holds without `unsafe-inline` (verified: inline scripts are blocked, app renders clean).
+- Chunk-upload protocol violations (out of range, uninitialized session, beyond declared size) now return `400 Bad Request` instead of `500`.
+- iOS Safari PWA: safe-area insets (notch/Dynamic Island) handled via CSS env variables, deferred `URL.revokeObjectURL` so downloads are not aborted by WebKit.
+
+### Changed
+- Bumped unified project version to `0.4.0` (Android `versionCode 40`).
+
+---
+
 ## [0.3.9] - 2026-10-16
 
 ### Fixed
