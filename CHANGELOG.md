@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`scripts/build-desktop.ps1`** — dedicated release build for the Tauri desktop artifact: applies the issue #1 workaround (removes stale package artifacts so `cargo build --release` recompiles and re-embeds the icon/version resource instead of a false up-to-date), verifies the embedded `ProductVersion`/`FileVersion` against `tauri.conf.json`, and publishes `dist-desktop/HushDrop-Desktop.exe` with `-Publish`.
+
 ## [0.5.1] - 2026-10-27
 
 ### Fixed
