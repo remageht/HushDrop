@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Pairing deep links (`hushdrop://pair`) now open the pairing modal** (#3): `appUrlOpen` was subscribed without a handler and `PairingModal` read the token only from the address bar (always empty in the native WebView), so the manifest-declared deep link opened the app silently. `initShareBridge` now delivers links through the existing `parsePairDeepLink` validator (RFC1918 host / hex token / fp format) to prefill host, token and fingerprint and open the modal; cold-start links are handled via `App.getLaunchUrl()`; already-paired sessions ignore links; browser PWA QR flow is preserved as fallback.
 - **PC console fails fast on busy ports before printing PIN/QR/URL** (#4): listeners were bound lazily in background goroutines after the banner, so a second running instance produced a "successful" startup whose QR pointed at the other (old) server. Both TCP listeners are now bound synchronously (`Server.Bind()`) before any output; a failed bind exits with an actionable message (`-port` / `-http-port` alternatives); windowsgui builds leave diagnostics in `data/startup-error.txt`, which is removed on a successful start. Verified with two instances: busy ports → instant exit with empty stdout; freed ports → clean start.
-- **docs(mobile)**: JDK 17+ (Android Studio `jbr`) requirement documented for gradle APK builds.
+- **docs(mobile)**: gradle APK build toolchain pinned to JDK 17-21 — JDK 25 (fresh Android Studio `jbr`) breaks the bundled Kotlin plugin's version parser, and stale gradle/Kotlin daemons in `~/.gradle` make JAVA_HOME switches ineffective until stopped.
 
 ---
 

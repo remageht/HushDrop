@@ -67,12 +67,18 @@ cd android
 ./gradlew assembleDebug
 cd ..
 ```
-> **Java toolchain (Windows):** путь `java` на PATH может указывать на JRE 1.8 — Capacitor 6 требует JDK 17+.
-> Перед запуском gradlew выставьте JDK из Android Studio:
+> **Java toolchain (Windows):** для сборки нужен JDK **17–21** (проверен на 17.0.20.1).
+> Не годятся: `java` с PATH, если это JRE 1.8 (Capacitor 6 требует JDK 17+), и свежий `jbr` из Android Studio (стал JDK 25) — вшитый Kotlin Gradle plugin падает на парсинге версии: `IllegalArgumentException: 25.0.3` → «cannot access built-in declaration 'kotlin.Int'».
+> Перед сменой JDK остановите старые демоны — иначе переиспользованная из daemon-registry конфигурация игнорирует ваш JAVA_HOME:
 > ```powershell
-> $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+> Get-CimInstance Win32_Process -Filter "Name='java.exe'" |
+>   Where-Object { $_.CommandLine -match 'gradle|KotlinCompileDaemon' } |
+>   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+> ./gradlew.bat --stop
+> $env:JAVA_HOME = "C:\path\to\jdk-17"
 > $env:Path = "$env:JAVA_HOME\bin;" + $env:Path
 > ```
+> Проверить выбранную JVM: `./gradlew.bat --version` (Launcher JVM).
 
 The compiled APK will be located at:
 `mobile/android/app/build/outputs/apk/debug/app-debug.apk`
