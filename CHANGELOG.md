@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-27
+
+### Fixed
+- **Pairing deep links (`hushdrop://pair`) now open the pairing modal** (#3): `appUrlOpen` was subscribed without a handler and `PairingModal` read the token only from the address bar (always empty in the native WebView), so the manifest-declared deep link opened the app silently. `initShareBridge` now delivers links through the existing `parsePairDeepLink` validator (RFC1918 host / hex token / fp format) to prefill host, token and fingerprint and open the modal; cold-start links are handled via `App.getLaunchUrl()`; already-paired sessions ignore links; browser PWA QR flow is preserved as fallback.
+- **PC console fails fast on busy ports before printing PIN/QR/URL** (#4): listeners were bound lazily in background goroutines after the banner, so a second running instance produced a "successful" startup whose QR pointed at the other (old) server. Both TCP listeners are now bound synchronously (`Server.Bind()`) before any output; a failed bind exits with an actionable message (`-port` / `-http-port` alternatives); windowsgui builds leave diagnostics in `data/startup-error.txt`, which is removed on a successful start. Verified with two instances: busy ports → instant exit with empty stdout; freed ports → clean start.
+- **docs(mobile)**: JDK 17+ (Android Studio `jbr`) requirement documented for gradle APK builds.
+
+---
+
 ## [0.5.0] - 2026-10-26
 
 ### Added

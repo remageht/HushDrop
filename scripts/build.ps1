@@ -16,7 +16,7 @@ if (!(Test-Path "$rootDir\internal\server\web")) {
 Copy-Item -Path "$rootDir\frontend\dist\*" -Destination "$rootDir\internal\server\web\" -Recurse -Force
 
 Write-Host "===> 2b. Generating Windows resource (brand icon + version info)..." -ForegroundColor Cyan
-$version = "0.5.0"
+$version = "0.5.1"
 $brandDir = "$rootDir\assets\brand"
 if (Test-Path "$brandDir\icon-1024.png") {
     $winres = [ordered]@{
@@ -65,7 +65,7 @@ if (!(Test-Path $distDir)) {
 }
 
 $env:CGO_ENABLED = "0"
-$version = "0.5.0"
+$version = "0.5.1"
 $ldflags = "-s -w -X main.version=$version -X main.openBrowserDefault=false"
 
 # Windows amd64 (console + GUI builds from the same code)
